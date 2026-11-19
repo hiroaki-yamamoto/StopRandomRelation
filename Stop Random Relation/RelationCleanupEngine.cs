@@ -24,31 +24,6 @@ public static class RelationCleanupEngine
 {
   private static readonly object TieBreakerLock = new();
 
-  private static class ThreadLocalListCache<T>
-  {
-    [ThreadStatic]
-    private static List<T>? _cached;
-
-    public static List<T> Rent()
-    {
-      List<T>? buffer = _cached;
-      if (buffer is null)
-      {
-        return [];
-      }
-
-      _cached = null;
-      buffer.Clear();
-      return buffer;
-    }
-
-    public static void Return(List<T> buffer)
-    {
-      buffer.Clear();
-      _cached = buffer;
-    }
-  }
-
   /// <summary>
   /// Evaluates all direct relations on <paramref name="subject"/> and severs
   /// both sides of every relation matching <paramref name="predicate"/>.

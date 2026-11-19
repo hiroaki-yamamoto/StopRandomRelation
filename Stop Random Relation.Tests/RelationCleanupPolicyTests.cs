@@ -291,6 +291,34 @@ public class RelationCleanupPolicyTests
       RelationCategory.Blood,
       RelationTrigger.OffMapSweep,
       options));
+
+    // Dead off-map non-player world pawn cleans lingering ties to colonists and
+    // on-map world pawns on off-map sweep when respective toggles are enabled.
+    PawnRoleInfo deadOffMapWorldPawn = OffMapWorldPawn with { IsDead = true };
+    Assert.True(RelationCleanupPolicy.ShouldSeverRelation(
+      deadOffMapWorldPawn,
+      LivingColonist,
+      RelationCategory.Blood,
+      RelationTrigger.OffMapSweep,
+      options));
+    Assert.True(RelationCleanupPolicy.ShouldSeverRelation(
+      deadOffMapWorldPawn,
+      OnMapWorldPawn,
+      RelationCategory.Blood,
+      RelationTrigger.OffMapSweep,
+      options));
+    Assert.False(RelationCleanupPolicy.ShouldSeverRelation(
+      deadOffMapWorldPawn,
+      LivingColonist,
+      RelationCategory.Blood,
+      RelationTrigger.OffMapSweep,
+      options with { CleanColonistToWorldRelationsOnExitOrDeath = false }));
+    Assert.False(RelationCleanupPolicy.ShouldSeverRelation(
+      deadOffMapWorldPawn,
+      OnMapWorldPawn,
+      RelationCategory.Blood,
+      RelationTrigger.OffMapSweep,
+      options with { CleanWorldToWorldRelationsOnExitOrDeath = false }));
   }
 
   [Fact]

@@ -22,6 +22,7 @@ public class RelationCleanupEngineTests
     public PawnRoleInfo Role { get; set; }
     public object SyncRoot { get; } = new();
     public List<(FakeRelationDef Def, FakePawn Other)> Relations { get; } = [];
+    public HashSet<FakePawn> IncomingPeers { get; } = [];
 
     public FakePawn(string id, PawnRoleInfo role)
     {
@@ -34,10 +35,29 @@ public class RelationCleanupEngineTests
       lock (SyncRoot)
       {
         Relations.Add((def, other));
+        IncomingPeers.Add(other);
       }
       lock (other.SyncRoot)
       {
         other.Relations.Add((def, this));
+        other.IncomingPeers.Add(this);
+      }
+    }
+
+    /// <summary>
+    /// Models non-reflexive RimWorld relations (such as Parent / ParentBirth)
+    /// where only the child stores the direct relation and the parent only
+    /// tracks the child in <c>pawnsWithDirectRelationsWithMe</c>.
+    /// </summary>
+    public void AddDirectedRelation(FakeRelationDef def, FakePawn other)
+    {
+      lock (SyncRoot)
+      {
+        Relations.Add((def, other));
+      }
+      lock (other.SyncRoot)
+      {
+        other.IncomingPeers.Add(this);
       }
     }
 
@@ -48,6 +68,17 @@ public class RelationCleanupEngineTests
         lock (SyncRoot)
         {
           return Relations.Count;
+        }
+      }
+    }
+
+    public int IncomingPeerCount
+    {
+      get
+      {
+        lock (SyncRoot)
+        {
+          return IncomingPeers.Count;
         }
       }
     }
@@ -66,7 +97,7 @@ public class RelationCleanupEngineTests
     {
       lock (pawn.SyncRoot)
       {
-        return pawn.Relations.Count > 0;
+        return pawn.Relations.Count > 0 || pawn.IncomingPeers.Count > 0;
       }
     }
 
@@ -74,28 +105,53 @@ public class RelationCleanupEngineTests
       FakePawn pawn,
       List<DirectRelationEntry<FakePawn, FakeRelationDef>> buffer)
     {
+      List<FakePawn> incoming;
       lock (pawn.SyncRoot)
       {
         foreach ((FakeRelationDef def, FakePawn other) in pawn.Relations)
         {
           buffer.Add(new DirectRelationEntry<FakePawn, FakeRelationDef>(def, other));
         }
+
+        incoming = pawn.IncomingPeers.ToList();
+      }
+
+      foreach (FakePawn other in incoming)
+      {
+        lock (other.SyncRoot)
+        {
+          foreach ((FakeRelationDef def, FakePawn target) in other.Relations)
+          {
+            if (ReferenceEquals(target, pawn)
+              && !buffer.Contains(new DirectRelationEntry<FakePawn, FakeRelationDef>(def, other)))
+            {
+              buffer.Add(new DirectRelationEntry<FakePawn, FakeRelationDef>(def, other));
+            }
+          }
+        }
       }
     }
 
     public bool RemoveDirectRelation(FakePawn pawn, FakeRelationDef def, FakePawn other)
     {
+      bool removed = false;
       for (int i = pawn.Relations.Count - 1; i >= 0; i--)
       {
         (FakeRelationDef d, FakePawn o) = pawn.Relations[i];
         if (ReferenceEquals(d, def) && ReferenceEquals(o, other))
         {
           pawn.Relations.RemoveAt(i);
-          return true;
+          removed = true;
+          break;
         }
       }
 
-      return false;
+      if (removed && !pawn.Relations.Any(r => ReferenceEquals(r.Other, other)))
+      {
+        other.IncomingPeers.Remove(pawn);
+      }
+
+      return removed;
     }
 
     public string DescribePawn(FakePawn? pawn) => pawn?.Id ?? "<null>";
@@ -103,6 +159,7 @@ public class RelationCleanupEngineTests
     public string DescribeRelation(FakeRelationDef? def) => def?.Name ?? "<null>";
   }
 
+  private static readonly FakeRelationDef BloodParent = new("Parent", RelationCategory.Blood);
   private static readonly FakeRelationDef BloodSibling = new("Sibling", RelationCategory.Blood);
   private static readonly FakeRelationDef MarriageSpouse = new("Spouse", RelationCategory.MarriageOrRomance);
   private static readonly FakeRelationDef AnimalBond = new("Bond", RelationCategory.None);
@@ -304,6 +361,104 @@ public class RelationCleanupEngineTests
 
     Assert.Equal(0, severed);
     Assert.Equal(0, expensiveEvaluations);
+  }
+
+  [Fact]
+  public void CleanForTrigger_AsymmetricParentRelation_SeversChildLinkWhenMotherDiesOrExits()
+  {
+    var colonistChild = new FakePawn("ColonistChild", ColonistRole);
+    var raiderMotherDead = new FakePawn(
+      "RaiderMotherDead",
+      new PawnRoleInfo(false, false, true, true, true, false));
+    var raiderMotherExiting = new FakePawn("RaiderMotherExiting", WorldOffMapRole);
+
+    // Only the child holds the direct Parent relation; the mother has zero outgoing relations.
+    colonistChild.AddDirectedRelation(BloodParent, raiderMotherDead);
+    colonistChild.AddDirectedRelation(BloodParent, raiderMotherExiting);
+    Assert.Equal(0, raiderMotherDead.RelationCount);
+    Assert.Equal(1, raiderMotherDead.IncomingPeerCount);
+
+    int severedOnDeath = RelationCleanupEngine.CleanForTrigger<FakePawn, FakeRelationDef, FakeRelationAccessor>(
+      default,
+      raiderMotherDead,
+      RelationTrigger.Death,
+      RelationCleanupOptions.Default);
+
+    int severedOnExit = RelationCleanupEngine.CleanForTrigger<FakePawn, FakeRelationDef, FakeRelationAccessor>(
+      default,
+      raiderMotherExiting,
+      RelationTrigger.MapExit,
+      RelationCleanupOptions.Default);
+
+    Assert.Equal(1, severedOnDeath);
+    Assert.Equal(1, severedOnExit);
+    Assert.Equal(0, colonistChild.RelationCount);
+    Assert.Equal(0, raiderMotherDead.IncomingPeerCount);
+    Assert.Equal(0, raiderMotherExiting.IncomingPeerCount);
+  }
+
+  [Fact]
+  public void CleanOffMapWorldPawns_AsymmetricParentOnDeadWorldPawn_SeversChildLink()
+  {
+    var colonistChild = new FakePawn("ColonistChild", ColonistRole);
+    var deadWorldMother = new FakePawn(
+      "DeadWorldMother",
+      new PawnRoleInfo(false, false, true, false, false, false));
+    var deadColonistFather = new FakePawn(
+      "DeadColonistFather",
+      new PawnRoleInfo(true, true, true, false, false, false));
+
+    colonistChild.AddDirectedRelation(BloodParent, deadWorldMother);
+    colonistChild.AddDirectedRelation(BloodParent, deadColonistFather);
+
+    int severed = RelationCleanupEngine.CleanOffMapWorldPawns<FakePawn, FakeRelationDef, FakeRelationAccessor>(
+      default,
+      [deadWorldMother, deadColonistFather],
+      RelationCleanupOptions.Default);
+
+    Assert.Equal(2, severed);
+    Assert.Equal(0, colonistChild.RelationCount);
+    Assert.Equal(0, deadWorldMother.IncomingPeerCount);
+    Assert.Equal(0, deadColonistFather.IncomingPeerCount);
+  }
+
+  [Fact]
+  public async Task CleanForTrigger_ConcurrentAsymmetricParentPairs_IsThreadSafeAndDeadlockFree()
+  {
+    const int pairCount = 100;
+    var pairs = new (FakePawn Child, FakePawn Mother)[pairCount];
+    for (int i = 0; i < pairCount; i++)
+    {
+      var child = new FakePawn($"Child_{i}", ColonistRole);
+      var mother = new FakePawn($"Mother_{i}", WorldOffMapRole);
+      child.AddDirectedRelation(BloodParent, mother);
+      pairs[i] = (child, mother);
+    }
+
+    var options = RelationCleanupOptions.Default;
+
+    Task[] tasks = Enumerable.Range(0, pairCount * 2).Select(idx => Task.Run(() =>
+    {
+      (FakePawn child, FakePawn mother) = pairs[idx % pairCount];
+      if (idx % 2 == 0)
+      {
+        RelationCleanupEngine.CleanForTrigger<FakePawn, FakeRelationDef, FakeRelationAccessor>(
+          default, mother, RelationTrigger.Death, options);
+      }
+      else
+      {
+        RelationCleanupEngine.CleanForTrigger<FakePawn, FakeRelationDef, FakeRelationAccessor>(
+          default, child, RelationTrigger.PermanentDeath, options);
+      }
+    })).ToArray();
+
+    await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(10));
+
+    foreach ((FakePawn child, FakePawn mother) in pairs)
+    {
+      Assert.Equal(0, child.RelationCount);
+      Assert.Equal(0, mother.IncomingPeerCount);
+    }
   }
 
   [Fact]

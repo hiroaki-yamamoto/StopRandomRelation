@@ -761,18 +761,20 @@
         <member name="M:Stop_Random_Relation.IRelationAccessor`2.HasAnyDirectRelations(`0)">
             <summary>
             Returns <c>true</c> if <paramref name="pawn"/> currently has at least one
-            direct relation, allowing <c>O(1)</c> fast-skipping before snapshotting.
+            outgoing or incoming direct relation, allowing <c>O(1)</c> fast-skipping
+            before snapshotting.
             </summary>
             <param name="pawn">The pawn to inspect.</param>
-            <returns><c>true</c> if one or more direct relations exist; otherwise <c>false</c>.</returns>
+            <returns><c>true</c> if one or more outgoing or incoming direct relations exist; otherwise <c>false</c>.</returns>
         </member>
         <member name="M:Stop_Random_Relation.IRelationAccessor`2.SnapshotDirectRelations(`0,System.Collections.Generic.List{Stop_Random_Relation.DirectRelationEntry{`0,`1}})">
             <summary>
-            Copies the pawn's direct relations into <paramref name="buffer"/> under lock
-            to allow safe iteration without collection-modification exceptions.
+            Copies the pawn's outgoing and incoming direct relations into
+            <paramref name="buffer"/> under lock to allow safe iteration without
+            collection-modification exceptions or lock-ordering deadlocks.
             </summary>
             <param name="pawn">The pawn whose direct relations are snapshotted.</param>
-            <param name="buffer">Caller-owned list populated with snapshots.</param>
+            <param name="buffer">Caller-owned list populated with deduplicated snapshots.</param>
         </member>
         <member name="M:Stop_Random_Relation.IRelationAccessor`2.RemoveDirectRelation(`0,`1,`0)">
             <summary>
@@ -1008,6 +1010,29 @@
             <summary>
             Serializes and deserializes mod settings using RimWorld's Scribe system.
             </summary>
+        </member>
+        <member name="T:Stop_Random_Relation.ThreadLocalListCache`1">
+            <summary>
+            Thread-safe, re-entrancy-safe thread-local pool for temporary <see cref="T:System.Collections.Generic.List`1"/> buffers.
+            </summary>
+            <typeparam name="T">The element type stored in the pooled list.</typeparam>
+            <remarks>
+            Renting detaches the cached buffer from the thread-static slot so nested or
+            re-entrant calls never alias the same list, and returning clears all elements
+            immediately so references are not pinned across GC cycles.
+            </remarks>
+        </member>
+        <member name="M:Stop_Random_Relation.ThreadLocalListCache`1.Rent">
+            <summary>
+            Rents an empty <see cref="T:System.Collections.Generic.List`1"/> buffer for the current thread.
+            </summary>
+            <returns>An empty list instance owned by the caller until returned.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.ThreadLocalListCache`1.Return(System.Collections.Generic.List{`0})">
+            <summary>
+            Clears <paramref name="buffer"/> and returns it to the current thread's cache.
+            </summary>
+            <param name="buffer">The list previously obtained from <see cref="M:Stop_Random_Relation.ThreadLocalListCache`1.Rent"/>.</param>
         </member>
         <member name="T:Stop_Random_Relation.WorldPawnSweepScheduler">
             <summary>

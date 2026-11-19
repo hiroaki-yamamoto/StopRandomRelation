@@ -144,18 +144,20 @@ public interface IRelationAccessor<TPawn, TRelationDef>
 
   /// <summary>
   /// Returns <c>true</c> if <paramref name="pawn"/> currently has at least one
-  /// direct relation, allowing <c>O(1)</c> fast-skipping before snapshotting.
+  /// outgoing or incoming direct relation, allowing <c>O(1)</c> fast-skipping
+  /// before snapshotting.
   /// </summary>
   /// <param name="pawn">The pawn to inspect.</param>
-  /// <returns><c>true</c> if one or more direct relations exist; otherwise <c>false</c>.</returns>
+  /// <returns><c>true</c> if one or more outgoing or incoming direct relations exist; otherwise <c>false</c>.</returns>
   bool HasAnyDirectRelations(TPawn pawn);
 
   /// <summary>
-  /// Copies the pawn's direct relations into <paramref name="buffer"/> under lock
-  /// to allow safe iteration without collection-modification exceptions.
+  /// Copies the pawn's outgoing and incoming direct relations into
+  /// <paramref name="buffer"/> under lock to allow safe iteration without
+  /// collection-modification exceptions or lock-ordering deadlocks.
   /// </summary>
   /// <param name="pawn">The pawn whose direct relations are snapshotted.</param>
-  /// <param name="buffer">Caller-owned list populated with snapshots.</param>
+  /// <param name="buffer">Caller-owned list populated with deduplicated snapshots.</param>
   void SnapshotDirectRelations(
     TPawn pawn,
     List<DirectRelationEntry<TPawn, TRelationDef>> buffer);

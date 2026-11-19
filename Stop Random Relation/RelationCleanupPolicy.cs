@@ -198,12 +198,7 @@ public static class RelationCleanupPolicy
         return false;
       }
 
-      if (other.IsColonist)
-      {
-        return options.CleanColonistRelationsOnPermanentDeath;
-      }
-
-      return !other.IsPlayerFaction && options.CleanColonistToWorldRelationsOnExitOrDeath;
+      return ShouldSeverOnMortality(subject, other, requireUnresurrectable: true, options);
     }
 
     if (subject.IsPlayerFaction || subject.IsOnColonistMap)
@@ -211,9 +206,19 @@ public static class RelationCleanupPolicy
       return false;
     }
 
-    if (other.IsColonist || other.IsPlayerFaction || other.IsOnColonistMap)
+    if (other.IsColonist)
+    {
+      return subject.IsDead && options.CleanColonistToWorldRelationsOnExitOrDeath;
+    }
+
+    if (other.IsPlayerFaction)
     {
       return false;
+    }
+
+    if (other.IsOnColonistMap)
+    {
+      return subject.IsDead && options.CleanWorldToWorldRelationsOnExitOrDeath;
     }
 
     return true;

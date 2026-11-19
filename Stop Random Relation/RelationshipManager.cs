@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using RimWorld;
 using RimWorld.Planet;
 using Verse;
@@ -29,7 +30,15 @@ public static class RelationshipManager
 
       lock (relations)
       {
-        return relations.DirectRelations != null && relations.DirectRelations.Count > 0;
+        if (relations.DirectRelations != null && relations.DirectRelations.Count > 0)
+        {
+          return true;
+        }
+
+        // Non-reflexive relations (e.g., Parent/ParentBirth) are stored only on
+        // the child's DirectRelations, while the parent holds incoming links here.
+        HashSet<Pawn>? incoming = GetIncomingRelationPawnsRef(relations);
+        return incoming != null && incoming.Count > 0;
       }
     }
 
@@ -43,22 +52,77 @@ public static class RelationshipManager
         return;
       }
 
-      lock (relations)
+      List<Pawn> incomingPawns = ThreadLocalListCache<Pawn>.Rent();
+      try
       {
-        List<DirectPawnRelation>? directRelations = relations.DirectRelations;
-        if (directRelations == null || directRelations.Count == 0)
+        // Phase 1: Snapshot outgoing relations and incoming peer references under
+        // subject's lock, then release before locking peers to prevent deadlocks.
+        lock (relations)
         {
-          return;
-        }
-
-        for (int i = 0; i < directRelations.Count; i++)
-        {
-          DirectPawnRelation rel = directRelations[i];
-          if (rel != null && rel.def != null && rel.otherPawn != null)
+          List<DirectPawnRelation>? directRelations = relations.DirectRelations;
+          if (directRelations != null && directRelations.Count > 0)
           {
-            buffer.Add(new DirectRelationEntry<Pawn, PawnRelationDef>(rel.def, rel.otherPawn));
+            for (int i = 0; i < directRelations.Count; i++)
+            {
+              DirectPawnRelation rel = directRelations[i];
+              if (rel != null && rel.def != null && rel.otherPawn != null)
+              {
+                buffer.Add(new DirectRelationEntry<Pawn, PawnRelationDef>(rel.def, rel.otherPawn));
+              }
+            }
+          }
+
+          HashSet<Pawn>? incoming = GetIncomingRelationPawnsRef(relations);
+          if (incoming != null && incoming.Count > 0)
+          {
+            foreach (Pawn other in incoming)
+            {
+              if (other != null && other != pawn)
+              {
+                incomingPawns.Add(other);
+              }
+            }
           }
         }
+
+        // Phase 2: Inspect each distinct peer's DirectRelations for links targeting subject.
+        int outgoingCount = buffer.Count;
+        for (int i = 0; i < incomingPawns.Count; i++)
+        {
+          Pawn other = incomingPawns[i];
+          Pawn_RelationsTracker? otherRelations = other.relations;
+          if (otherRelations == null)
+          {
+            continue;
+          }
+
+          int peerStart = buffer.Count;
+          lock (otherRelations)
+          {
+            List<DirectPawnRelation>? otherDirect = otherRelations.DirectRelations;
+            if (otherDirect == null || otherDirect.Count == 0)
+            {
+              continue;
+            }
+
+            for (int j = 0; j < otherDirect.Count; j++)
+            {
+              DirectPawnRelation rel = otherDirect[j];
+              if (rel != null
+                && rel.def != null
+                && rel.otherPawn == pawn
+                && !ContainsInRange(buffer, 0, outgoingCount, rel.def, other)
+                && !ContainsInRange(buffer, peerStart, buffer.Count, rel.def, other))
+              {
+                buffer.Add(new DirectRelationEntry<Pawn, PawnRelationDef>(rel.def, other));
+              }
+            }
+          }
+        }
+      }
+      finally
+      {
+        ThreadLocalListCache<Pawn>.Return(incomingPawns);
       }
     }
 
@@ -78,7 +142,30 @@ public static class RelationshipManager
     {
       return def == null ? "<null>" : def.defName;
     }
+
+    private static bool ContainsInRange(
+      List<DirectRelationEntry<Pawn, PawnRelationDef>> buffer,
+      int startIndex,
+      int endExclusive,
+      PawnRelationDef def,
+      Pawn other)
+    {
+      for (int i = startIndex; i < endExclusive; i++)
+      {
+        DirectRelationEntry<Pawn, PawnRelationDef> existing = buffer[i];
+        if (ReferenceEquals(existing.Def, def) && ReferenceEquals(existing.Other, other))
+        {
+          return true;
+        }
+      }
+
+      return false;
+    }
   }
+
+  [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "pawnsWithDirectRelationsWithMe")]
+  private static extern ref HashSet<Pawn>? GetIncomingRelationPawnsRef(
+    Pawn_RelationsTracker relations);
 
   private readonly struct RimWorldWorldPawnPruneAccessor : IWorldPawnPruneAccessor<Pawn>
   {
@@ -166,8 +253,12 @@ public static class RelationshipManager
   /// <returns><c>true</c> if GC must retain this pawn; otherwise <c>false</c>.</returns>
   public static bool ShouldProtectFromGC(Pawn? pawn, in RelationCleanupOptions options)
   {
-    PawnRoleInfo role = PawnStateEvaluator.GetRoleInfo(pawn);
-    return RelationCleanupPolicy.ShouldProtectFromGC(role, options);
+    if (!options.ModEnabled || !options.ProtectLivingFactionLeaders)
+    {
+      return false;
+    }
+
+    return PawnStateEvaluator.IsActiveFactionLeader(pawn);
   }
 
   /// <summary>
@@ -240,27 +331,34 @@ public static class RelationshipManager
         return 0;
       }
 
-      // Copy only world pawns that have direct relations so empty pawns are skipped in O(1).
-      List<Pawn> candidates = new();
-      for (int i = 0; i < worldPawns.Count; i++)
+      // Copy only world pawns that have direct or incoming relations so empty pawns are skipped in O(1).
+      List<Pawn> candidates = ThreadLocalListCache<Pawn>.Rent();
+      try
       {
-        Pawn? pawn = worldPawns[i];
-        if (pawn != null && default(RimWorldRelationAccessor).HasAnyDirectRelations(pawn))
+        for (int i = 0; i < worldPawns.Count; i++)
         {
-          candidates.Add(pawn);
+          Pawn? pawn = worldPawns[i];
+          if (pawn != null && default(RimWorldRelationAccessor).HasAnyDirectRelations(pawn))
+          {
+            candidates.Add(pawn);
+          }
         }
-      }
 
-      if (candidates.Count == 0)
+        if (candidates.Count == 0)
+        {
+          return 0;
+        }
+
+        return RelationCleanupEngine.CleanOffMapWorldPawns<Pawn, PawnRelationDef, RimWorldRelationAccessor>(
+          default,
+          candidates,
+          options,
+          options.VerboseLogging ? VerboseLogger : null);
+      }
+      finally
       {
-        return 0;
+        ThreadLocalListCache<Pawn>.Return(candidates);
       }
-
-      return RelationCleanupEngine.CleanOffMapWorldPawns<Pawn, PawnRelationDef, RimWorldRelationAccessor>(
-        default,
-        candidates,
-        options,
-        options.VerboseLogging ? VerboseLogger : null);
     }
   }
 

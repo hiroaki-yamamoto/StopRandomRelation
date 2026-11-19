@@ -228,7 +228,7 @@ public static class PawnStateEvaluator
       return true;
     }
 
-    return IsOnColonistMap(pawn);
+    return false;
   }
 
   /// <summary>
