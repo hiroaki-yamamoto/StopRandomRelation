@@ -1,4 +1,5 @@
 using RimWorld;
+using RimWorld.Planet;
 using Verse;
 
 namespace Stop_Random_Relation;
@@ -190,5 +191,189 @@ public static class PawnStateEvaluator
       IsResurrectable: IsResurrectable(pawn),
       IsOnColonistMap: IsOnColonistMap(pawn),
       IsActiveFactionLeader: IsActiveFactionLeader(pawn));
+  }
+
+  /// <summary>
+  /// Returns a concise diagnostic string describing <paramref name="pawn"/>.
+  /// </summary>
+  /// <param name="pawn">The pawn to describe.</param>
+  /// <returns>A short human-readable identifier.</returns>
+  public static string DescribePawn(Pawn? pawn)
+  {
+    return pawn == null ? "<null>" : $"{pawn.LabelShort} ({pawn.ThingID})";
+  }
+
+  /// <summary>
+  /// Determines whether <paramref name="pawn"/> (or its corpse/holder) is
+  /// currently spawned or held on any map.
+  /// </summary>
+  /// <param name="pawn">The pawn to evaluate.</param>
+  /// <returns><c>true</c> if the pawn is on any map; otherwise <c>false</c>.</returns>
+  public static bool IsOnAnyMap(Pawn? pawn)
+  {
+    if (pawn == null)
+    {
+      return false;
+    }
+
+    if (pawn.Spawned || pawn.Map != null || pawn.MapHeld != null)
+    {
+      return true;
+    }
+
+    if (pawn.Dead
+      && pawn.Corpse != null
+      && (pawn.Corpse.Spawned || pawn.Corpse.MapHeld != null))
+    {
+      return true;
+    }
+
+    return IsOnColonistMap(pawn);
+  }
+
+  /// <summary>
+  /// Determines whether <paramref name="pawn"/> currently has any direct or
+  /// incoming relationship preserved on its <see cref="Pawn_RelationsTracker"/>.
+  /// </summary>
+  /// <param name="pawn">The pawn to evaluate.</param>
+  /// <returns><c>true</c> if any relation exists; otherwise <c>false</c>.</returns>
+  public static bool HasAnyProtectedRelation(Pawn? pawn)
+  {
+    Pawn_RelationsTracker? relations = pawn?.relations;
+    if (relations == null)
+    {
+      return false;
+    }
+
+    lock (relations)
+    {
+      if (relations.RelatedToAnyoneOrAnyoneRelatedToMe)
+      {
+        return true;
+      }
+
+      return relations.DirectRelations != null && relations.DirectRelations.Count > 0;
+    }
+  }
+
+  /// <summary>
+  /// Determines whether <paramref name="pawn"/> must be retained because of
+  /// essential RimWorld world state (quests, caravans, kidnapping, transport
+  /// pods, forceful pins, colony captivity, or already being discarded).
+  /// </summary>
+  /// <param name="pawn">The world pawn to evaluate.</param>
+  /// <param name="worldPawns">The active <see cref="WorldPawns"/> manager.</param>
+  /// <returns><c>true</c> if the pawn is protected by game state; otherwise <c>false</c>.</returns>
+  public static bool IsProtectedByWorldState(Pawn? pawn, WorldPawns? worldPawns)
+  {
+    if (pawn == null || pawn.Discarded)
+    {
+      return true;
+    }
+
+    // Check O(1) WorldPawns hash/dictionary lookups before heavier world queries.
+    if (worldPawns != null
+      && (!worldPawns.Contains(pawn)
+        || worldPawns.ForcefullyKeptPawns.Contains(pawn)
+        || worldPawns.PawnSourced(pawn)
+        || worldPawns.IsBeingDiscarded(pawn)))
+    {
+      return true;
+    }
+
+    if (pawn.IsPrisonerOfColony
+      || pawn.IsSlaveOfColony
+      || QuestUtility.IsReservedByQuestOrQuestBeingGenerated(pawn)
+      || PawnUtility.IsKidnappedPawn(pawn)
+      || PawnUtility.IsTravelingInTransportPodWorldObject(pawn))
+    {
+      return true;
+    }
+
+    if (worldPawns == null)
+    {
+      return false;
+    }
+
+    WorldPawnSituation situation = worldPawns.GetSituation(pawn);
+    return situation switch
+    {
+      WorldPawnSituation.Free => false,
+      WorldPawnSituation.Dead => false,
+      // Living faction leader protection is governed by ProtectLivingFactionLeaders.
+      WorldPawnSituation.FactionLeader => false,
+      _ => true,
+    };
+  }
+
+  /// <summary>
+  /// Projects a live RimWorld world <see cref="Pawn"/> into an immutable
+  /// <see cref="WorldPawnPruneInfo"/> snapshot using short-circuit evaluation
+  /// from cheapest <c>O(1)</c> checks to heavier world-state queries.
+  /// </summary>
+  /// <param name="pawn">The world pawn to inspect.</param>
+  /// <param name="worldPawns">The active <see cref="WorldPawns"/> manager.</param>
+  /// <param name="protectLivingFactionLeaders">
+  /// Whether living faction leaders are protected by the active configuration.
+  /// </param>
+  /// <returns>An immutable <see cref="WorldPawnPruneInfo"/> snapshot.</returns>
+  public static WorldPawnPruneInfo GetWorldPawnPruneInfo(
+    Pawn? pawn,
+    WorldPawns? worldPawns,
+    bool protectLivingFactionLeaders = true)
+  {
+    if (pawn == null || pawn.Discarded)
+    {
+      return new WorldPawnPruneInfo(default, IsOnAnyMap: false, IsProtectedByGameState: true, HasAnyRelation: false);
+    }
+
+    if (IsOnAnyMap(pawn))
+    {
+      return new WorldPawnPruneInfo(default, IsOnAnyMap: true, IsProtectedByGameState: false, HasAnyRelation: false);
+    }
+
+    if (IsPlayerFaction(pawn))
+    {
+      var playerRole = new PawnRoleInfo(
+        IsColonist: IsColonist(pawn),
+        IsPlayerFaction: true,
+        IsDead: pawn.Dead,
+        IsResurrectable: false,
+        IsOnColonistMap: false,
+        IsActiveFactionLeader: false);
+      return new WorldPawnPruneInfo(playerRole, IsOnAnyMap: false, IsProtectedByGameState: false, HasAnyRelation: false);
+    }
+
+    bool isActiveLeader = IsActiveFactionLeader(pawn);
+    if (protectLivingFactionLeaders && isActiveLeader)
+    {
+      var leaderRole = new PawnRoleInfo(
+        IsColonist: false,
+        IsPlayerFaction: false,
+        IsDead: false,
+        IsResurrectable: false,
+        IsOnColonistMap: false,
+        IsActiveFactionLeader: true);
+      return new WorldPawnPruneInfo(leaderRole, IsOnAnyMap: false, IsProtectedByGameState: false, HasAnyRelation: false);
+    }
+
+    if (HasAnyProtectedRelation(pawn))
+    {
+      return new WorldPawnPruneInfo(default, IsOnAnyMap: false, IsProtectedByGameState: false, HasAnyRelation: true);
+    }
+
+    if (IsProtectedByWorldState(pawn, worldPawns))
+    {
+      return new WorldPawnPruneInfo(default, IsOnAnyMap: false, IsProtectedByGameState: true, HasAnyRelation: false);
+    }
+
+    var candidateRole = new PawnRoleInfo(
+      IsColonist: false,
+      IsPlayerFaction: false,
+      IsDead: pawn.Dead,
+      IsResurrectable: false,
+      IsOnColonistMap: false,
+      IsActiveFactionLeader: isActiveLeader);
+    return new WorldPawnPruneInfo(candidateRole, IsOnAnyMap: false, IsProtectedByGameState: false, HasAnyRelation: false);
   }
 }

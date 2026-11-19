@@ -16,7 +16,9 @@ public class StopRandomRelationMod : Mod
 
   private readonly StopRandomRelationSettings _settings;
   private Vector2 _scrollPosition;
-  private float _cachedContentHeight = 520f;
+  private float _cachedContentHeight = 620f;
+  private string? _offMapSweepIntervalBuffer;
+  private string? _worldPawnThresholdBuffer;
 
   /// <summary>
   /// Gets the active mod instance initialized by RimWorld at startup.
@@ -100,6 +102,24 @@ public class StopRandomRelationMod : Mod
       listing,
       "SRR_CleanOffMapWorldPawns",
       ref _settings.cleanOffMapWorldPawnRelations);
+    DrawIntField(
+      listing,
+      "SRR_OffMapSweepIntervalTicks",
+      ref _settings.offMapSweepIntervalTicks,
+      ref _offMapSweepIntervalBuffer,
+      0,
+      RelationCleanupOptions.MaxOffMapSweepIntervalTicks);
+    DrawCheckbox(
+      listing,
+      "SRR_DeleteUnprotectedOffMapWorldPawns",
+      ref _settings.deleteUnprotectedOffMapWorldPawns);
+    DrawIntField(
+      listing,
+      "SRR_UnprotectedOffMapWorldPawnThreshold",
+      ref _settings.unprotectedOffMapWorldPawnThreshold,
+      ref _worldPawnThresholdBuffer,
+      RelationCleanupOptions.MinWorldPawnThreshold,
+      RelationCleanupOptions.MaxWorldPawnThreshold);
     listing.Gap();
 
     DrawSectionHeader(listing, "SRR_Section_ProtectionRules");
@@ -122,6 +142,7 @@ public class StopRandomRelationMod : Mod
     if (Widgets.ButtonText(resetRect, "SRR_ResetDefaults".Translate()))
     {
       _settings.ResetToDefaults();
+      SyncNumericBuffers();
     }
 
     _cachedContentHeight = listing.CurHeight + 16f;
@@ -141,6 +162,42 @@ public class StopRandomRelationMod : Mod
       (baseKey + "_Label").Translate(),
       ref value,
       (baseKey + "_Tip").Translate());
+  }
+
+  private static void DrawIntField(
+    Listing_Standard listing,
+    string baseKey,
+    ref int value,
+    ref string? buffer,
+    int min,
+    int max)
+  {
+    buffer ??= value.ToString();
+
+    Rect rect = listing.GetRect(Text.LineHeight);
+    if (Mouse.IsOver(rect))
+    {
+      Widgets.DrawHighlight(rect);
+    }
+
+    TooltipHandler.TipRegion(rect, (baseKey + "_Tip").Translate());
+
+    Rect labelRect = rect.LeftPart(0.72f);
+    Rect fieldRect = rect.RightPart(0.26f);
+
+    TextAnchor previousAnchor = Text.Anchor;
+    Text.Anchor = TextAnchor.MiddleLeft;
+    Widgets.Label(labelRect, (baseKey + "_Label").Translate());
+    Text.Anchor = previousAnchor;
+
+    Widgets.TextFieldNumeric(fieldRect, ref value, ref buffer, min, max);
+    listing.Gap(listing.verticalSpacing);
+  }
+
+  private void SyncNumericBuffers()
+  {
+    _offMapSweepIntervalBuffer = _settings.offMapSweepIntervalTicks.ToString();
+    _worldPawnThresholdBuffer = _settings.unprotectedOffMapWorldPawnThreshold.ToString();
   }
 
   private static void DrawSectionHeader(Listing_Standard listing, string titleKey)

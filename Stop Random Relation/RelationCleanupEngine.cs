@@ -24,16 +24,14 @@ public static class RelationCleanupEngine
 {
   private static readonly object TieBreakerLock = new();
 
-  private static class SnapshotBufferCache<TPawn, TRelationDef>
-    where TPawn : class
-    where TRelationDef : class
+  private static class ThreadLocalListCache<T>
   {
     [ThreadStatic]
-    private static List<DirectRelationEntry<TPawn, TRelationDef>>? _cached;
+    private static List<T>? _cached;
 
-    public static List<DirectRelationEntry<TPawn, TRelationDef>> Rent()
+    public static List<T> Rent()
     {
-      List<DirectRelationEntry<TPawn, TRelationDef>>? buffer = _cached;
+      List<T>? buffer = _cached;
       if (buffer is null)
       {
         return [];
@@ -44,7 +42,7 @@ public static class RelationCleanupEngine
       return buffer;
     }
 
-    public static void Return(List<DirectRelationEntry<TPawn, TRelationDef>> buffer)
+    public static void Return(List<T> buffer)
     {
       buffer.Clear();
       _cached = buffer;
@@ -81,7 +79,7 @@ public static class RelationCleanupEngine
     }
 
     List<DirectRelationEntry<TPawn, TRelationDef>> snapshot =
-      SnapshotBufferCache<TPawn, TRelationDef>.Rent();
+      ThreadLocalListCache<DirectRelationEntry<TPawn, TRelationDef>>.Rent();
     try
     {
       accessor.SnapshotDirectRelations(subject, snapshot);
@@ -112,7 +110,7 @@ public static class RelationCleanupEngine
     }
     finally
     {
-      SnapshotBufferCache<TPawn, TRelationDef>.Return(snapshot);
+      ThreadLocalListCache<DirectRelationEntry<TPawn, TRelationDef>>.Return(snapshot);
     }
   }
 
@@ -149,7 +147,7 @@ public static class RelationCleanupEngine
     }
 
     List<DirectRelationEntry<TPawn, TRelationDef>> snapshot =
-      SnapshotBufferCache<TPawn, TRelationDef>.Rent();
+      ThreadLocalListCache<DirectRelationEntry<TPawn, TRelationDef>>.Rent();
     try
     {
       PawnRoleInfo subjectRole = accessor.GetRoleInfo(subject);
@@ -164,7 +162,7 @@ public static class RelationCleanupEngine
     }
     finally
     {
-      SnapshotBufferCache<TPawn, TRelationDef>.Return(snapshot);
+      ThreadLocalListCache<DirectRelationEntry<TPawn, TRelationDef>>.Return(snapshot);
     }
   }
 
@@ -196,7 +194,7 @@ public static class RelationCleanupEngine
 
     int totalSevered = 0;
     List<DirectRelationEntry<TPawn, TRelationDef>> snapshot =
-      SnapshotBufferCache<TPawn, TRelationDef>.Rent();
+      ThreadLocalListCache<DirectRelationEntry<TPawn, TRelationDef>>.Rent();
     try
     {
       for (int i = 0; i < worldPawns.Count; i++)
@@ -233,7 +231,107 @@ public static class RelationCleanupEngine
     }
     finally
     {
-      SnapshotBufferCache<TPawn, TRelationDef>.Return(snapshot);
+      ThreadLocalListCache<DirectRelationEntry<TPawn, TRelationDef>>.Return(snapshot);
+    }
+  }
+
+  /// <summary>
+  /// Counts unprotected, off-map world pawns in <paramref name="worldPawns"/> and
+  /// deletes all such candidates when their count reaches
+  /// <see cref="RelationCleanupOptions.UnprotectedOffMapWorldPawnThreshold"/>.
+  /// </summary>
+  /// <typeparam name="TPawn">The pawn type.</typeparam>
+  /// <typeparam name="TAccessor">Struct adapter type.</typeparam>
+  /// <param name="accessor">Adapter instance.</param>
+  /// <param name="worldPawns">World pawns collection to evaluate.</param>
+  /// <param name="options">Current mod configuration snapshot.</param>
+  /// <param name="onDeleted">
+  /// Optional callback invoked with the positive count of deleted world pawns.
+  /// </param>
+  /// <param name="logAction">Optional diagnostic logging callback.</param>
+  /// <returns>The number of world pawns actually deleted.</returns>
+  /// <remarks>
+  /// Runs in <c>O(1)</c> time when disabled or when total world pawn count is
+  /// strictly below the threshold; otherwise runs in <c>O(N)</c> time and
+  /// amortized <c>O(1)</c> auxiliary space using thread-local buffer reuse.
+  /// </remarks>
+  public static int PruneUnprotectedOffMapWorldPawns<TPawn, TAccessor>(
+    TAccessor accessor,
+    IReadOnlyList<TPawn>? worldPawns,
+    in RelationCleanupOptions options,
+    Action<int>? onDeleted = null,
+    Action<string>? logAction = null)
+    where TPawn : class
+    where TAccessor : struct, IWorldPawnPruneAccessor<TPawn>
+  {
+    if (!options.ModEnabled
+      || !options.DeleteUnprotectedOffMapWorldPawns
+      || worldPawns is null)
+    {
+      return 0;
+    }
+
+    int threshold = RelationCleanupOptions.ClampWorldPawnThreshold(
+      options.UnprotectedOffMapWorldPawnThreshold);
+    int totalCount = worldPawns.Count;
+    if (totalCount < threshold)
+    {
+      return 0;
+    }
+
+    List<TPawn> candidates = ThreadLocalListCache<TPawn>.Rent();
+    try
+    {
+      for (int i = 0; i < totalCount; i++)
+      {
+        // Early-exit when even retaining every remaining pawn cannot reach threshold.
+        if (candidates.Count + (totalCount - i) < threshold)
+        {
+          break;
+        }
+
+        TPawn? pawn = worldPawns[i];
+        if (pawn is null)
+        {
+          continue;
+        }
+
+        WorldPawnPruneInfo info = accessor.GetWorldPawnPruneInfo(pawn);
+        if (RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(info, options))
+        {
+          candidates.Add(pawn);
+        }
+      }
+
+      if (candidates.Count < threshold)
+      {
+        return 0;
+      }
+
+      int deletedCount = 0;
+      for (int i = 0; i < candidates.Count; i++)
+      {
+        TPawn pawn = candidates[i];
+        if (accessor.TryDiscardWorldPawn(pawn))
+        {
+          deletedCount++;
+          if (options.VerboseLogging && logAction is not null)
+          {
+            logAction($"Deleted unprotected off-map world pawn {accessor.DescribePawn(pawn)}.");
+          }
+        }
+      }
+
+      if (deletedCount > 0)
+      {
+        onDeleted?.Invoke(deletedCount);
+      }
+
+      return deletedCount;
+    }
+    finally
+    {
+      ThreadLocalListCache<TPawn>.Return(candidates);
     }
   }
 

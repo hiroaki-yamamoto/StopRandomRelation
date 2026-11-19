@@ -25,6 +25,15 @@ public class StopRandomRelationSettings : ModSettings
   /// <summary>Clean relations between off-map world pawns.</summary>
   public bool cleanOffMapWorldPawnRelations = true;
 
+  /// <summary>Delete unprotected off-map world pawns when their count reaches threshold.</summary>
+  public bool deleteUnprotectedOffMapWorldPawns = false;
+
+  /// <summary>Threshold of unprotected off-map world pawns required to trigger deletion.</summary>
+  public int unprotectedOffMapWorldPawnThreshold = RelationCleanupOptions.DefaultWorldPawnThreshold;
+
+  /// <summary>Periodic off-map sweep interval in ticks (0 = immediate on threshold).</summary>
+  public int offMapSweepIntervalTicks = RelationCleanupOptions.DefaultOffMapSweepIntervalTicks;
+
   /// <summary>Protect living faction leaders from WorldPawnGC.</summary>
   public bool protectLivingFactionLeaders = true;
 
@@ -52,8 +61,14 @@ public class StopRandomRelationSettings : ModSettings
   /// </summary>
   public void RefreshSnapshot()
   {
+    bool changed = false;
     lock (_writeLock)
     {
+      int clampedThreshold = RelationCleanupOptions.ClampWorldPawnThreshold(
+        unprotectedOffMapWorldPawnThreshold);
+      int clampedInterval = RelationCleanupOptions.ClampSweepIntervalTicks(
+        offMapSweepIntervalTicks);
+
       var updated = new RelationCleanupOptions
       {
         ModEnabled = modEnabled,
@@ -61,6 +76,9 @@ public class StopRandomRelationSettings : ModSettings
         CleanColonistToWorldRelationsOnExitOrDeath = cleanColonistToWorldRelationsOnExitOrDeath,
         CleanWorldToWorldRelationsOnExitOrDeath = cleanWorldToWorldRelationsOnExitOrDeath,
         CleanOffMapWorldPawnRelations = cleanOffMapWorldPawnRelations,
+        DeleteUnprotectedOffMapWorldPawns = deleteUnprotectedOffMapWorldPawns,
+        UnprotectedOffMapWorldPawnThreshold = clampedThreshold,
+        OffMapSweepIntervalTicks = clampedInterval,
         ProtectLivingFactionLeaders = protectLivingFactionLeaders,
         IncludeNonBloodRelations = includeNonBloodRelations,
         VerboseLogging = verboseLogging,
@@ -69,7 +87,13 @@ public class StopRandomRelationSettings : ModSettings
       if (_snapshot.Value != updated)
       {
         _snapshot = new SnapshotHolder(updated);
+        changed = true;
       }
+    }
+
+    if (changed)
+    {
+      WorldPawnSweepScheduler.Shared.MarkDirty();
     }
   }
 
@@ -87,11 +111,16 @@ public class StopRandomRelationSettings : ModSettings
       cleanColonistToWorldRelationsOnExitOrDeath = defaults.CleanColonistToWorldRelationsOnExitOrDeath;
       cleanWorldToWorldRelationsOnExitOrDeath = defaults.CleanWorldToWorldRelationsOnExitOrDeath;
       cleanOffMapWorldPawnRelations = defaults.CleanOffMapWorldPawnRelations;
+      deleteUnprotectedOffMapWorldPawns = defaults.DeleteUnprotectedOffMapWorldPawns;
+      unprotectedOffMapWorldPawnThreshold = defaults.UnprotectedOffMapWorldPawnThreshold;
+      offMapSweepIntervalTicks = defaults.OffMapSweepIntervalTicks;
       protectLivingFactionLeaders = defaults.ProtectLivingFactionLeaders;
       includeNonBloodRelations = defaults.IncludeNonBloodRelations;
       verboseLogging = defaults.VerboseLogging;
       _snapshot = new SnapshotHolder(defaults);
     }
+
+    WorldPawnSweepScheduler.Shared.MarkDirty();
   }
 
   /// <summary>
@@ -117,6 +146,18 @@ public class StopRandomRelationSettings : ModSettings
       ref cleanOffMapWorldPawnRelations,
       "cleanOffMapWorldPawnRelations",
       true);
+    Scribe_Values.Look(
+      ref deleteUnprotectedOffMapWorldPawns,
+      "deleteUnprotectedOffMapWorldPawns",
+      false);
+    Scribe_Values.Look(
+      ref unprotectedOffMapWorldPawnThreshold,
+      "unprotectedOffMapWorldPawnThreshold",
+      RelationCleanupOptions.DefaultWorldPawnThreshold);
+    Scribe_Values.Look(
+      ref offMapSweepIntervalTicks,
+      "offMapSweepIntervalTicks",
+      RelationCleanupOptions.DefaultOffMapSweepIntervalTicks);
     Scribe_Values.Look(
       ref protectLivingFactionLeaders,
       "protectLivingFactionLeaders",

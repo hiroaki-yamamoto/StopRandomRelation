@@ -18,6 +18,12 @@
   <SRR_CleanWorldToWorld_Tip>両者が入植者マップ上に生存している間は関係を維持し、どちらかがマップ離脱または死亡した際に関係を削除します。</SRR_CleanWorldToWorld_Tip>
   <SRR_CleanOffMapWorldPawns_Label>マップ外のワールドポーン同士の関係を削除する</SRR_CleanOffMapWorldPawns_Label>
   <SRR_CleanOffMapWorldPawns_Tip>どちらも入植者マップ上に存在しないワールドポーン同士の関係を削除し、GC 対象にします。</SRR_CleanOffMapWorldPawns_Tip>
+  <SRR_OffMapSweepIntervalTicks_Label>定期スイープ間隔 (ticks、0 = 即時実行)</SRR_OffMapSweepIntervalTicks_Label>
+  <SRR_OffMapSweepIntervalTicks_Tip>マップ外のワールドポーンの関係整理および閾値削除を行うゲームティック間隔です（デフォルト: 2500）。0 を指定すると、非保護ワールドポーン数が閾値以上に達した際に即座に実行します。</SRR_OffMapSweepIntervalTicks_Tip>
+  <SRR_DeleteUnprotectedOffMapWorldPawns_Label>保護対象外のマップ外ワールドポーンを一定数以上で削除する</SRR_DeleteUnprotectedOffMapWorldPawns_Label>
+  <SRR_DeleteUnprotectedOffMapWorldPawns_Tip>有効にすると、本MODの保護条件や関係・ゲーム進行上の保護対象に含まれずマップ外にいるワールドポーンの数が指定人数以上になった際、該当ポーンをすべて削除しメッセージで通知します。</SRR_DeleteUnprotectedOffMapWorldPawns_Tip>
+  <SRR_UnprotectedOffMapWorldPawnThreshold_Label>削除を開始するワールドポーン数（閾値）</SRR_UnprotectedOffMapWorldPawnThreshold_Label>
+  <SRR_UnprotectedOffMapWorldPawnThreshold_Tip>保護対象外かつマップ外のワールドポーンがこの人数以上に達すると削除を実行します（デフォルト: 100）。</SRR_UnprotectedOffMapWorldPawnThreshold_Tip>
 
   <SRR_Section_ProtectionRules>保護ルール</SRR_Section_ProtectionRules>
   <SRR_ProtectFactionLeaders_Label>生存中の派閥リーダーを GC から保護する</SRR_ProtectFactionLeaders_Label>
@@ -30,4 +36,5 @@
   <SRR_VerboseLogging_Tip>関係の削除および GC 保護の詳細を開発者コンソールに出力します。</SRR_VerboseLogging_Tip>
 
   <SRR_ResetDefaults>デフォルトに戻す</SRR_ResetDefaults>
+  <SRR_WorldPawnsDeletedMessage>保護されていないマップ外のワールドポーンを {0} 人削除しました。</SRR_WorldPawnsDeletedMessage>
 </LanguageData>

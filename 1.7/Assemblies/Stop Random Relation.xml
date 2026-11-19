@@ -83,17 +83,29 @@
             Prefix executed at the beginning of GC data accumulation.
             </summary>
         </member>
-        <member name="T:Stop_Random_Relation.HarmonyPatches.WorldPawns_WorldPawnsTick_Patch">
+        <member name="T:Stop_Random_Relation.HarmonyPatches.WorldPawns_PassToWorld_Patch">
             <summary>
-            Periodically cleans stale off-map world pawn relations during world ticking
-            so off-map relations generated during quests or world events are pruned
-            promptly without waiting for the full 15,000-tick GC cycle.
+            Marks the world pawn pool dirty whenever a pawn enters <see cref="T:RimWorld.Planet.WorldPawns"/>
+            so immediate-mode threshold pruning evaluates promptly on the next tick.
             </summary>
         </member>
-        <member name="M:Stop_Random_Relation.HarmonyPatches.WorldPawns_WorldPawnsTick_Patch.Postfix">
+        <member name="M:Stop_Random_Relation.HarmonyPatches.WorldPawns_PassToWorld_Patch.Postfix">
+            <summary>
+            Postfix executed after <see cref="M:RimWorld.Planet.WorldPawns.PassToWorld(Verse.Pawn,RimWorld.Planet.PawnDiscardDecideMode)"/> completes.
+            </summary>
+        </member>
+        <member name="T:Stop_Random_Relation.HarmonyPatches.WorldPawns_WorldPawnsTick_Patch">
+            <summary>
+            Periodically (or immediately when sweep interval is 0) cleans stale off-map
+            world pawn relations and prunes excess unprotected off-map world pawns
+            during world ticking.
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.HarmonyPatches.WorldPawns_WorldPawnsTick_Patch.Postfix(RimWorld.Planet.WorldPawns)">
             <summary>
             Postfix executed on <see cref="M:RimWorld.Planet.WorldPawns.WorldPawnsTick"/>.
             </summary>
+            <param name="__instance">The active <see cref="T:RimWorld.Planet.WorldPawns"/> manager.</param>
         </member>
         <member name="T:Stop_Random_Relation.PawnStateEvaluator">
             <summary>
@@ -183,6 +195,52 @@
             <param name="pawn">The pawn to inspect.</param>
             <returns>An immutable <see cref="T:Stop_Random_Relation.PawnRoleInfo"/> snapshot.</returns>
         </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.DescribePawn(Verse.Pawn)">
+            <summary>
+            Returns a concise diagnostic string describing <paramref name="pawn"/>.
+            </summary>
+            <param name="pawn">The pawn to describe.</param>
+            <returns>A short human-readable identifier.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.IsOnAnyMap(Verse.Pawn)">
+            <summary>
+            Determines whether <paramref name="pawn"/> (or its corpse/holder) is
+            currently spawned or held on any map.
+            </summary>
+            <param name="pawn">The pawn to evaluate.</param>
+            <returns><c>true</c> if the pawn is on any map; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.HasAnyProtectedRelation(Verse.Pawn)">
+            <summary>
+            Determines whether <paramref name="pawn"/> currently has any direct or
+            incoming relationship preserved on its <see cref="T:RimWorld.Pawn_RelationsTracker"/>.
+            </summary>
+            <param name="pawn">The pawn to evaluate.</param>
+            <returns><c>true</c> if any relation exists; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.IsProtectedByWorldState(Verse.Pawn,RimWorld.Planet.WorldPawns)">
+            <summary>
+            Determines whether <paramref name="pawn"/> must be retained because of
+            essential RimWorld world state (quests, caravans, kidnapping, transport
+            pods, forceful pins, colony captivity, or already being discarded).
+            </summary>
+            <param name="pawn">The world pawn to evaluate.</param>
+            <param name="worldPawns">The active <see cref="T:RimWorld.Planet.WorldPawns"/> manager.</param>
+            <returns><c>true</c> if the pawn is protected by game state; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.GetWorldPawnPruneInfo(Verse.Pawn,RimWorld.Planet.WorldPawns,System.Boolean)">
+            <summary>
+            Projects a live RimWorld world <see cref="T:Verse.Pawn"/> into an immutable
+            <see cref="T:Stop_Random_Relation.WorldPawnPruneInfo"/> snapshot using short-circuit evaluation
+            from cheapest <c>O(1)</c> checks to heavier world-state queries.
+            </summary>
+            <param name="pawn">The world pawn to inspect.</param>
+            <param name="worldPawns">The active <see cref="T:RimWorld.Planet.WorldPawns"/> manager.</param>
+            <param name="protectLivingFactionLeaders">
+            Whether living faction leaders are protected by the active configuration.
+            </param>
+            <returns>An immutable <see cref="T:Stop_Random_Relation.WorldPawnPruneInfo"/> snapshot.</returns>
+        </member>
         <member name="T:Stop_Random_Relation.RelationCleanupEngine">
             <summary>
             Thread-safe, zero-reflection relationship pruning engine parameterized by an
@@ -247,6 +305,28 @@
             <param name="logAction">Optional callback invoked per severed relation.</param>
             <returns>Total number of relationships severed across the sweep.</returns>
         </member>
+        <member name="M:Stop_Random_Relation.RelationCleanupEngine.PruneUnprotectedOffMapWorldPawns``2(``1,System.Collections.Generic.IReadOnlyList{``0},Stop_Random_Relation.RelationCleanupOptions@,System.Action{System.Int32},System.Action{System.String})">
+            <summary>
+            Counts unprotected, off-map world pawns in <paramref name="worldPawns"/> and
+            deletes all such candidates when their count reaches
+            <see cref="P:Stop_Random_Relation.RelationCleanupOptions.UnprotectedOffMapWorldPawnThreshold"/>.
+            </summary>
+            <typeparam name="TPawn">The pawn type.</typeparam>
+            <typeparam name="TAccessor">Struct adapter type.</typeparam>
+            <param name="accessor">Adapter instance.</param>
+            <param name="worldPawns">World pawns collection to evaluate.</param>
+            <param name="options">Current mod configuration snapshot.</param>
+            <param name="onDeleted">
+            Optional callback invoked with the positive count of deleted world pawns.
+            </param>
+            <param name="logAction">Optional diagnostic logging callback.</param>
+            <returns>The number of world pawns actually deleted.</returns>
+            <remarks>
+            Runs in <c>O(1)</c> time when disabled or when total world pawn count is
+            strictly below the threshold; otherwise runs in <c>O(N)</c> time and
+            amortized <c>O(1)</c> auxiliary space using thread-local buffer reuse.
+            </remarks>
+        </member>
         <member name="M:Stop_Random_Relation.RelationCleanupEngine.SeverPairAtomically``3(``2,``0,``1,``0)">
             <summary>
             Removes a direct relation between <paramref name="pawnA"/> and <paramref name="pawnB"/>
@@ -261,6 +341,31 @@
             Reading an immutable value snapshot avoids torn reads and lock contention
             when evaluation occurs across simulation or worker threads.
             </remarks>
+        </member>
+        <member name="F:Stop_Random_Relation.RelationCleanupOptions.MinWorldPawnThreshold">
+            <summary>
+            Minimum allowed value for <see cref="P:Stop_Random_Relation.RelationCleanupOptions.UnprotectedOffMapWorldPawnThreshold"/>.
+            </summary>
+        </member>
+        <member name="F:Stop_Random_Relation.RelationCleanupOptions.DefaultWorldPawnThreshold">
+            <summary>
+            Default value for <see cref="P:Stop_Random_Relation.RelationCleanupOptions.UnprotectedOffMapWorldPawnThreshold"/>.
+            </summary>
+        </member>
+        <member name="F:Stop_Random_Relation.RelationCleanupOptions.MaxWorldPawnThreshold">
+            <summary>
+            Maximum allowed value for <see cref="P:Stop_Random_Relation.RelationCleanupOptions.UnprotectedOffMapWorldPawnThreshold"/>.
+            </summary>
+        </member>
+        <member name="F:Stop_Random_Relation.RelationCleanupOptions.DefaultOffMapSweepIntervalTicks">
+            <summary>
+            Default interval in game ticks for periodic off-map sweeps (<c>0</c> = immediate).
+            </summary>
+        </member>
+        <member name="F:Stop_Random_Relation.RelationCleanupOptions.MaxOffMapSweepIntervalTicks">
+            <summary>
+            Maximum allowed interval in game ticks for periodic off-map sweeps.
+            </summary>
         </member>
         <member name="P:Stop_Random_Relation.RelationCleanupOptions.Default">
             <summary>
@@ -296,6 +401,24 @@
             severed during GC preparation and periodic maintenance sweeps.
             </summary>
         </member>
+        <member name="P:Stop_Random_Relation.RelationCleanupOptions.DeleteUnprotectedOffMapWorldPawns">
+            <summary>
+            Gets a value indicating whether unprotected off-map world pawns are deleted
+            once their count reaches <see cref="P:Stop_Random_Relation.RelationCleanupOptions.UnprotectedOffMapWorldPawnThreshold"/>.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.RelationCleanupOptions.UnprotectedOffMapWorldPawnThreshold">
+            <summary>
+            Gets the minimum number of unprotected off-map world pawns required to
+            trigger deletion when <see cref="P:Stop_Random_Relation.RelationCleanupOptions.DeleteUnprotectedOffMapWorldPawns"/> is enabled.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.RelationCleanupOptions.OffMapSweepIntervalTicks">
+            <summary>
+            Gets the periodic sweep interval in game ticks (<c>0</c> triggers immediate
+            evaluation when unprotected off-map world pawns reach the threshold).
+            </summary>
+        </member>
         <member name="P:Stop_Random_Relation.RelationCleanupOptions.ProtectLivingFactionLeaders">
             <summary>
             Gets a value indicating whether living faction leaders are strictly
@@ -313,6 +436,22 @@
             Gets a value indicating whether diagnostic logs are emitted to the
             RimWorld console when relations are severed or leaders are protected.
             </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationCleanupOptions.ClampWorldPawnThreshold(System.Int32)">
+            <summary>
+            Clamps <paramref name="value"/> to the valid range for
+            <see cref="P:Stop_Random_Relation.RelationCleanupOptions.UnprotectedOffMapWorldPawnThreshold"/>.
+            </summary>
+            <param name="value">Raw threshold value.</param>
+            <returns>Value clamped between <see cref="F:Stop_Random_Relation.RelationCleanupOptions.MinWorldPawnThreshold"/> and <see cref="F:Stop_Random_Relation.RelationCleanupOptions.MaxWorldPawnThreshold"/>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationCleanupOptions.ClampSweepIntervalTicks(System.Int32)">
+            <summary>
+            Clamps <paramref name="value"/> to the valid range for
+            <see cref="P:Stop_Random_Relation.RelationCleanupOptions.OffMapSweepIntervalTicks"/>.
+            </summary>
+            <param name="value">Raw sweep interval in ticks.</param>
+            <returns>Value clamped between <c>0</c> and <see cref="F:Stop_Random_Relation.RelationCleanupOptions.MaxOffMapSweepIntervalTicks"/>.</returns>
         </member>
         <member name="T:Stop_Random_Relation.RelationCleanupPolicy">
             <summary>
@@ -363,6 +502,27 @@
             <param name="pawn">Role snapshot of the evaluated world pawn.</param>
             <param name="options">Current mod configuration snapshot.</param>
             <returns><c>true</c> if GC must retain the pawn; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(Stop_Random_Relation.WorldPawnPruneInfo@,Stop_Random_Relation.RelationCleanupOptions@)">
+            <summary>
+            Determines whether a world pawn is an unprotected, off-map deletion
+            candidate eligible for threshold pruning.
+            </summary>
+            <param name="info">Projected world pawn pruning state.</param>
+            <param name="options">Current mod configuration snapshot.</param>
+            <returns>
+            <c>true</c> if the pawn is off-map and not protected by mod rules,
+            remaining relationships, or essential game state; otherwise <c>false</c>.
+            </returns>
+            <example>
+            <code>
+            var role = new PawnRoleInfo(false, false, false, false, false, false);
+            var info = new WorldPawnPruneInfo(role, IsOnAnyMap: false, IsProtectedByGameState: false, HasAnyRelation: false);
+            var opts = RelationCleanupOptions.Default with { DeleteUnprotectedOffMapWorldPawns = true };
+            bool delete = RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(info, opts);
+            // delete == true
+            </code>
+            </example>
         </member>
         <member name="T:Stop_Random_Relation.RelationTrigger">
             <summary>
@@ -488,6 +648,62 @@
             <c>true</c> if the pawn is alive and designated as a faction leader.
             </summary>
         </member>
+        <member name="T:Stop_Random_Relation.WorldPawnPruneInfo">
+            <summary>
+            Pure-value projection of a world pawn's map presence, critical game-state
+            retention status, and remaining relationship status for threshold pruning.
+            </summary>
+            <param name="Role">Core domain role snapshot of the pawn.</param>
+            <param name="IsOnAnyMap">
+            <c>true</c> if the pawn (or its corpse/holder) is currently spawned or held on any map.
+            </param>
+            <param name="IsProtectedByGameState">
+            <c>true</c> if RimWorld's world state requires retaining the pawn (e.g., reserved by quest,
+            caravan member, kidnapped, in traveling transport pod, borrowed, for sale, teleporting,
+            forcefully kept, or already discarded).
+            </param>
+            <param name="HasAnyRelation">
+            <c>true</c> if the pawn still has any preserved direct or incoming relations.
+            </param>
+        </member>
+        <member name="M:Stop_Random_Relation.WorldPawnPruneInfo.#ctor(Stop_Random_Relation.PawnRoleInfo,System.Boolean,System.Boolean,System.Boolean)">
+            <summary>
+            Pure-value projection of a world pawn's map presence, critical game-state
+            retention status, and remaining relationship status for threshold pruning.
+            </summary>
+            <param name="Role">Core domain role snapshot of the pawn.</param>
+            <param name="IsOnAnyMap">
+            <c>true</c> if the pawn (or its corpse/holder) is currently spawned or held on any map.
+            </param>
+            <param name="IsProtectedByGameState">
+            <c>true</c> if RimWorld's world state requires retaining the pawn (e.g., reserved by quest,
+            caravan member, kidnapped, in traveling transport pod, borrowed, for sale, teleporting,
+            forcefully kept, or already discarded).
+            </param>
+            <param name="HasAnyRelation">
+            <c>true</c> if the pawn still has any preserved direct or incoming relations.
+            </param>
+        </member>
+        <member name="P:Stop_Random_Relation.WorldPawnPruneInfo.Role">
+            <summary>Core domain role snapshot of the pawn.</summary>
+        </member>
+        <member name="P:Stop_Random_Relation.WorldPawnPruneInfo.IsOnAnyMap">
+            <summary>
+            <c>true</c> if the pawn (or its corpse/holder) is currently spawned or held on any map.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.WorldPawnPruneInfo.IsProtectedByGameState">
+            <summary>
+            <c>true</c> if RimWorld's world state requires retaining the pawn (e.g., reserved by quest,
+            caravan member, kidnapped, in traveling transport pod, borrowed, for sale, teleporting,
+            forcefully kept, or already discarded).
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.WorldPawnPruneInfo.HasAnyRelation">
+            <summary>
+            <c>true</c> if the pawn still has any preserved direct or incoming relations.
+            </summary>
+        </member>
         <member name="T:Stop_Random_Relation.DirectRelationEntry`2">
             <summary>
             Represents a direct relation entry captured during snapshot iteration.
@@ -581,6 +797,35 @@
             <param name="def">The relation definition to describe.</param>
             <returns>A short display string.</returns>
         </member>
+        <member name="T:Stop_Random_Relation.IWorldPawnPruneAccessor`1">
+            <summary>
+            Zero-allocation adapter contract for evaluating and discarding world pawns
+            without coupling the pruning engine to RimWorld concrete types.
+            </summary>
+            <typeparam name="TPawn">The pawn representation type.</typeparam>
+        </member>
+        <member name="M:Stop_Random_Relation.IWorldPawnPruneAccessor`1.GetWorldPawnPruneInfo(`0)">
+            <summary>
+            Evaluates the map presence, game-state protection, and relation retention
+            state of <paramref name="pawn"/>.
+            </summary>
+            <param name="pawn">The world pawn to evaluate.</param>
+            <returns>An immutable <see cref="T:Stop_Random_Relation.WorldPawnPruneInfo"/> snapshot.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.IWorldPawnPruneAccessor`1.TryDiscardWorldPawn(`0)">
+            <summary>
+            Removes <paramref name="pawn"/> from the world pawn pool and discards it.
+            </summary>
+            <param name="pawn">The world pawn to delete.</param>
+            <returns><c>true</c> if the pawn was removed and discarded; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.IWorldPawnPruneAccessor`1.DescribePawn(`0)">
+            <summary>
+            Returns a human-readable label for diagnostic logging.
+            </summary>
+            <param name="pawn">The pawn to describe.</param>
+            <returns>A short display string.</returns>
+        </member>
         <member name="T:Stop_Random_Relation.RelationshipManager">
             <summary>
             Core domain service coordinating relationship queries, thread-safe relation
@@ -654,6 +899,19 @@
             <param name="options">Current mod configuration snapshot.</param>
             <returns>Total number of relationships severed across the sweep.</returns>
         </member>
+        <member name="M:Stop_Random_Relation.RelationshipManager.PruneExcessUnprotectedOffMapWorldPawns(Stop_Random_Relation.RelationCleanupOptions@,System.Action{System.Int32})">
+            <summary>
+            Evaluates world pawns and deletes all unprotected, off-map candidates
+            when their count reaches
+            <see cref="P:Stop_Random_Relation.RelationCleanupOptions.UnprotectedOffMapWorldPawnThreshold"/>,
+            displaying an in-game message reporting the deleted count.
+            </summary>
+            <param name="options">Current mod configuration snapshot.</param>
+            <param name="onDeleted">
+            Optional callback overriding the default <see cref="M:Verse.Messages.Message(System.String,Verse.MessageTypeDef,System.Boolean)"/> notification.
+            </param>
+            <returns>The number of world pawns deleted.</returns>
+        </member>
         <member name="T:Stop_Random_Relation.StopRandomRelationMod">
             <summary>
             Entry point and Mod Settings UI controller for Stop Random Relation.
@@ -710,6 +968,15 @@
         <member name="F:Stop_Random_Relation.StopRandomRelationSettings.cleanOffMapWorldPawnRelations">
             <summary>Clean relations between off-map world pawns.</summary>
         </member>
+        <member name="F:Stop_Random_Relation.StopRandomRelationSettings.deleteUnprotectedOffMapWorldPawns">
+            <summary>Delete unprotected off-map world pawns when their count reaches threshold.</summary>
+        </member>
+        <member name="F:Stop_Random_Relation.StopRandomRelationSettings.unprotectedOffMapWorldPawnThreshold">
+            <summary>Threshold of unprotected off-map world pawns required to trigger deletion.</summary>
+        </member>
+        <member name="F:Stop_Random_Relation.StopRandomRelationSettings.offMapSweepIntervalTicks">
+            <summary>Periodic off-map sweep interval in ticks (0 = immediate on threshold).</summary>
+        </member>
         <member name="F:Stop_Random_Relation.StopRandomRelationSettings.protectLivingFactionLeaders">
             <summary>Protect living faction leaders from WorldPawnGC.</summary>
         </member>
@@ -741,6 +1008,56 @@
             <summary>
             Serializes and deserializes mod settings using RimWorld's Scribe system.
             </summary>
+        </member>
+        <member name="T:Stop_Random_Relation.WorldPawnSweepScheduler">
+            <summary>
+            Thread-safe coordinator deciding when off-map relation sweeps and threshold
+            world pawn pruning should run during <c>WorldPawnsTick</c>.
+            </summary>
+            <remarks>
+            Uses atomic <see cref="T:System.Threading.Interlocked"/> state transitions so concurrent callers
+            cannot trigger duplicate evaluations for the same game tick or lose dirty
+            notifications emitted by lifecycle hooks.
+            </remarks>
+        </member>
+        <member name="F:Stop_Random_Relation.WorldPawnSweepScheduler.ImmediateFallbackIntervalTicks">
+            <summary>
+            Fallback tick interval in immediate mode (<c>OffMapSweepIntervalTicks == 0</c>)
+            for catching state changes not covered by direct hooks (e.g., expired quests).
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.WorldPawnSweepScheduler.Shared">
+            <summary>
+            Gets the shared runtime scheduler instance used by mod hooks and settings.
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.WorldPawnSweepScheduler.MarkDirty">
+            <summary>
+            Marks the world pawn pool as needing re-evaluation on the next eligible tick.
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.WorldPawnSweepScheduler.Reset">
+            <summary>
+            Resets scheduler state (intended for testing or game session resets).
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.WorldPawnSweepScheduler.ShouldRunSweep(System.Int32,System.Int32,Stop_Random_Relation.RelationCleanupOptions@)">
+            <summary>
+            Evaluates in <c>O(1)</c> time whether an off-map sweep and pruning pass
+            should execute at <paramref name="ticksGame"/>.
+            </summary>
+            <param name="ticksGame">Current game tick count.</param>
+            <param name="totalWorldPawns">Total number of pawns in <c>WorldPawns</c>.</param>
+            <param name="options">Current mod configuration snapshot.</param>
+            <returns><c>true</c> if the caller should run the sweep; otherwise <c>false</c>.</returns>
+            <example>
+            <code>
+            var scheduler = new WorldPawnSweepScheduler();
+            var opts = RelationCleanupOptions.Default with { OffMapSweepIntervalTicks = 0 };
+            bool run = scheduler.ShouldRunSweep(1, 10, opts);
+            // run == true (initial dirty state)
+            </code>
+            </example>
         </member>
     </members>
 </doc>

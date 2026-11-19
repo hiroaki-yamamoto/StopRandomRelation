@@ -10,8 +10,6 @@ namespace Stop_Random_Relation;
 /// </summary>
 internal static class HarmonyPatches
 {
-  private const int OffMapSweepIntervalTicks = 2500;
-
   /// <summary>
   /// Triggers relation cleanup when a non-player pawn exits a map.
   /// </summary>
@@ -33,6 +31,7 @@ internal static class HarmonyPatches
       RelationshipManager.HandlePawnExitMap(
         __instance,
         StopRandomRelationMod.GetOptions());
+      WorldPawnSweepScheduler.Shared.MarkDirty();
     }
   }
 
@@ -57,6 +56,7 @@ internal static class HarmonyPatches
       RelationshipManager.HandlePawnKilled(
         __instance,
         StopRandomRelationMod.GetOptions());
+      WorldPawnSweepScheduler.Shared.MarkDirty();
     }
   }
 
@@ -83,6 +83,7 @@ internal static class HarmonyPatches
     RelationshipManager.HandlePermanentDeath(
       innerPawn,
       StopRandomRelationMod.GetOptions());
+    WorldPawnSweepScheduler.Shared.MarkDirty();
   }
 
   /// <summary>
@@ -181,15 +182,14 @@ internal static class HarmonyPatches
   }
 
   /// <summary>
-  /// Periodically cleans stale off-map world pawn relations during world ticking
-  /// so off-map relations generated during quests or world events are pruned
-  /// promptly without waiting for the full 15,000-tick GC cycle.
+  /// Marks the world pawn pool dirty whenever a pawn enters <see cref="WorldPawns"/>
+  /// so immediate-mode threshold pruning evaluates promptly on the next tick.
   /// </summary>
-  [HarmonyPatch(typeof(WorldPawns), nameof(WorldPawns.WorldPawnsTick))]
-  internal static class WorldPawns_WorldPawnsTick_Patch
+  [HarmonyPatch(typeof(WorldPawns), nameof(WorldPawns.PassToWorld), [typeof(Pawn), typeof(PawnDiscardDecideMode)])]
+  internal static class WorldPawns_PassToWorld_Patch
   {
     /// <summary>
-    /// Postfix executed on <see cref="WorldPawns.WorldPawnsTick"/>.
+    /// Postfix executed after <see cref="WorldPawns.PassToWorld(Pawn, PawnDiscardDecideMode)"/> completes.
     /// </summary>
     [HarmonyPostfix]
     public static void Postfix()
@@ -199,16 +199,48 @@ internal static class HarmonyPatches
         return;
       }
 
-      TickManager? tickManager = Find.TickManager;
-      if (tickManager == null
-        || tickManager.TicksGame <= 0
-        || tickManager.TicksGame % OffMapSweepIntervalTicks != 0)
+      WorldPawnSweepScheduler.Shared.MarkDirty();
+    }
+  }
+
+  /// <summary>
+  /// Periodically (or immediately when sweep interval is 0) cleans stale off-map
+  /// world pawn relations and prunes excess unprotected off-map world pawns
+  /// during world ticking.
+  /// </summary>
+  [HarmonyPatch(typeof(WorldPawns), nameof(WorldPawns.WorldPawnsTick))]
+  internal static class WorldPawns_WorldPawnsTick_Patch
+  {
+    /// <summary>
+    /// Postfix executed on <see cref="WorldPawns.WorldPawnsTick"/>.
+    /// </summary>
+    /// <param name="__instance">The active <see cref="WorldPawns"/> manager.</param>
+    [HarmonyPostfix]
+    public static void Postfix(WorldPawns __instance)
+    {
+      if (Current.ProgramState != ProgramState.Playing)
       {
         return;
       }
 
-      RelationshipManager.CleanAllOffMapWorldPawnRelations(
-        StopRandomRelationMod.GetOptions());
+      TickManager? tickManager = Find.TickManager;
+      if (tickManager == null)
+      {
+        return;
+      }
+
+      RelationCleanupOptions options = StopRandomRelationMod.GetOptions();
+      int totalWorldPawns = __instance?.AllPawnsAliveOrDead?.Count ?? 0;
+      if (!WorldPawnSweepScheduler.Shared.ShouldRunSweep(
+        tickManager.TicksGame,
+        totalWorldPawns,
+        options))
+      {
+        return;
+      }
+
+      RelationshipManager.CleanAllOffMapWorldPawnRelations(options);
+      RelationshipManager.PruneExcessUnprotectedOffMapWorldPawns(options);
     }
   }
 }

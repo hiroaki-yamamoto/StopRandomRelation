@@ -18,6 +18,12 @@
   <SRR_CleanWorldToWorld_Tip>Maintains relations between world pawns while both are alive on a colonist map, and severs them once either leaves the map or dies.</SRR_CleanWorldToWorld_Tip>
   <SRR_CleanOffMapWorldPawns_Label>Sever off-map world pawn relations</SRR_CleanOffMapWorldPawns_Label>
   <SRR_CleanOffMapWorldPawns_Tip>Severs relations between non-colonist world pawns neither of whom is present on a colonist map.</SRR_CleanOffMapWorldPawns_Tip>
+  <SRR_OffMapSweepIntervalTicks_Label>Off-map sweep interval (ticks, 0 = immediate)</SRR_OffMapSweepIntervalTicks_Label>
+  <SRR_OffMapSweepIntervalTicks_Tip>Interval in game ticks between periodic off-map relation sweeps and threshold deletions (default: 2500). Set to 0 to evaluate immediately when unprotected off-map world pawns reach the threshold.</SRR_OffMapSweepIntervalTicks_Tip>
+  <SRR_DeleteUnprotectedOffMapWorldPawns_Label>Delete unprotected off-map world pawns at threshold</SRR_DeleteUnprotectedOffMapWorldPawns_Label>
+  <SRR_DeleteUnprotectedOffMapWorldPawns_Tip>When enabled, if the number of unprotected world pawns not on any map reaches the configured threshold, all such unprotected off-map world pawns are deleted and a message reports how many were removed.</SRR_DeleteUnprotectedOffMapWorldPawns_Tip>
+  <SRR_UnprotectedOffMapWorldPawnThreshold_Label>Unprotected off-map world pawn threshold</SRR_UnprotectedOffMapWorldPawnThreshold_Label>
+  <SRR_UnprotectedOffMapWorldPawnThreshold_Tip>Minimum number of unprotected off-map world pawns required before deleting all eligible candidates (default: 100).</SRR_UnprotectedOffMapWorldPawnThreshold_Tip>
 
   <SRR_Section_ProtectionRules>Protection Rules</SRR_Section_ProtectionRules>
   <SRR_ProtectFactionLeaders_Label>Protect living faction leaders from garbage collection</SRR_ProtectFactionLeaders_Label>
@@ -30,4 +36,5 @@
   <SRR_VerboseLogging_Tip>Outputs relationship severing and GC protection details to the RimWorld developer log.</SRR_VerboseLogging_Tip>
 
   <SRR_ResetDefaults>Reset to defaults</SRR_ResetDefaults>
+  <SRR_WorldPawnsDeletedMessage>Deleted {0} unprotected off-map world pawn(s).</SRR_WorldPawnsDeletedMessage>
 </LanguageData>

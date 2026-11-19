@@ -92,6 +92,57 @@ public static class RelationCleanupPolicy
       && pawn.IsActiveFactionLeader;
   }
 
+  /// <summary>
+  /// Determines whether a world pawn is an unprotected, off-map deletion
+  /// candidate eligible for threshold pruning.
+  /// </summary>
+  /// <param name="info">Projected world pawn pruning state.</param>
+  /// <param name="options">Current mod configuration snapshot.</param>
+  /// <returns>
+  /// <c>true</c> if the pawn is off-map and not protected by mod rules,
+  /// remaining relationships, or essential game state; otherwise <c>false</c>.
+  /// </returns>
+  /// <example>
+  /// <code>
+  /// var role = new PawnRoleInfo(false, false, false, false, false, false);
+  /// var info = new WorldPawnPruneInfo(role, IsOnAnyMap: false, IsProtectedByGameState: false, HasAnyRelation: false);
+  /// var opts = RelationCleanupOptions.Default with { DeleteUnprotectedOffMapWorldPawns = true };
+  /// bool delete = RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(info, opts);
+  /// // delete == true
+  /// </code>
+  /// </example>
+  public static bool ShouldDeleteWorldPawnOnThreshold(
+    in WorldPawnPruneInfo info,
+    in RelationCleanupOptions options)
+  {
+    if (!options.ModEnabled || !options.DeleteUnprotectedOffMapWorldPawns)
+    {
+      return false;
+    }
+
+    if (info.IsOnAnyMap || info.Role.IsOnColonistMap)
+    {
+      return false;
+    }
+
+    if (info.Role.IsColonist || info.Role.IsPlayerFaction)
+    {
+      return false;
+    }
+
+    if (ShouldProtectFromGC(info.Role, options))
+    {
+      return false;
+    }
+
+    if (info.IsProtectedByGameState || info.HasAnyRelation)
+    {
+      return false;
+    }
+
+    return true;
+  }
+
   private static bool ShouldSeverNonPlayerPawnRelation(
     in PawnRoleInfo other,
     in RelationCleanupOptions options)

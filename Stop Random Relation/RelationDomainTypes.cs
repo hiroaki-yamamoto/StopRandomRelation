@@ -78,6 +78,28 @@ public readonly record struct PawnRoleInfo(
   bool IsActiveFactionLeader);
 
 /// <summary>
+/// Pure-value projection of a world pawn's map presence, critical game-state
+/// retention status, and remaining relationship status for threshold pruning.
+/// </summary>
+/// <param name="Role">Core domain role snapshot of the pawn.</param>
+/// <param name="IsOnAnyMap">
+/// <c>true</c> if the pawn (or its corpse/holder) is currently spawned or held on any map.
+/// </param>
+/// <param name="IsProtectedByGameState">
+/// <c>true</c> if RimWorld's world state requires retaining the pawn (e.g., reserved by quest,
+/// caravan member, kidnapped, in traveling transport pod, borrowed, for sale, teleporting,
+/// forcefully kept, or already discarded).
+/// </param>
+/// <param name="HasAnyRelation">
+/// <c>true</c> if the pawn still has any preserved direct or incoming relations.
+/// </param>
+public readonly record struct WorldPawnPruneInfo(
+  PawnRoleInfo Role,
+  bool IsOnAnyMap,
+  bool IsProtectedByGameState,
+  bool HasAnyRelation);
+
+/// <summary>
 /// Represents a direct relation entry captured during snapshot iteration.
 /// </summary>
 /// <typeparam name="TPawn">The pawn representation type.</typeparam>
@@ -160,4 +182,35 @@ public interface IRelationAccessor<TPawn, TRelationDef>
   /// <param name="def">The relation definition to describe.</param>
   /// <returns>A short display string.</returns>
   string DescribeRelation(TRelationDef? def);
+}
+
+/// <summary>
+/// Zero-allocation adapter contract for evaluating and discarding world pawns
+/// without coupling the pruning engine to RimWorld concrete types.
+/// </summary>
+/// <typeparam name="TPawn">The pawn representation type.</typeparam>
+public interface IWorldPawnPruneAccessor<TPawn>
+  where TPawn : class
+{
+  /// <summary>
+  /// Evaluates the map presence, game-state protection, and relation retention
+  /// state of <paramref name="pawn"/>.
+  /// </summary>
+  /// <param name="pawn">The world pawn to evaluate.</param>
+  /// <returns>An immutable <see cref="WorldPawnPruneInfo"/> snapshot.</returns>
+  WorldPawnPruneInfo GetWorldPawnPruneInfo(TPawn? pawn);
+
+  /// <summary>
+  /// Removes <paramref name="pawn"/> from the world pawn pool and discards it.
+  /// </summary>
+  /// <param name="pawn">The world pawn to delete.</param>
+  /// <returns><c>true</c> if the pawn was removed and discarded; otherwise <c>false</c>.</returns>
+  bool TryDiscardWorldPawn(TPawn pawn);
+
+  /// <summary>
+  /// Returns a human-readable label for diagnostic logging.
+  /// </summary>
+  /// <param name="pawn">The pawn to describe.</param>
+  /// <returns>A short display string.</returns>
+  string DescribePawn(TPawn? pawn);
 }

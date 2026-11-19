@@ -346,4 +346,273 @@ public class RelationCleanupEngineTests
       Assert.Equal(0, right.RelationCount);
     }
   }
+
+  private sealed class FakeWorldPawn
+  {
+    public string Id { get; }
+    public WorldPawnPruneInfo Info { get; set; }
+    public object SyncRoot { get; } = new();
+    public bool Discarded { get; set; }
+    public bool AllowDiscard { get; set; } = true;
+
+    public FakeWorldPawn(string id, WorldPawnPruneInfo info)
+    {
+      Id = id;
+      Info = info;
+    }
+  }
+
+  private readonly struct FakeWorldPawnPruneAccessor : IWorldPawnPruneAccessor<FakeWorldPawn>
+  {
+    private readonly Action? _onInspect;
+
+    public FakeWorldPawnPruneAccessor(Action? onInspect = null)
+    {
+      _onInspect = onInspect;
+    }
+
+    public WorldPawnPruneInfo GetWorldPawnPruneInfo(FakeWorldPawn? pawn)
+    {
+      _onInspect?.Invoke();
+      return pawn?.Info ?? default;
+    }
+
+    public bool TryDiscardWorldPawn(FakeWorldPawn pawn)
+    {
+      if (!pawn.AllowDiscard)
+      {
+        return false;
+      }
+
+      lock (pawn.SyncRoot)
+      {
+        if (pawn.Discarded)
+        {
+          return false;
+        }
+
+        pawn.Discarded = true;
+        return true;
+      }
+    }
+
+    public string DescribePawn(FakeWorldPawn? pawn) => pawn?.Id ?? "<null>";
+  }
+
+  [Fact]
+  public void PruneUnprotectedOffMapWorldPawns_SkipsInO1WhenDisabledOrBelowTotalCount()
+  {
+    int inspections = 0;
+    var accessor = new FakeWorldPawnPruneAccessor(() => inspections++);
+    var candidate = new FakeWorldPawn(
+      "P1",
+      new WorldPawnPruneInfo(WorldOffMapRole, false, false, false));
+
+    int deletedDisabled = RelationCleanupEngine.PruneUnprotectedOffMapWorldPawns(
+      accessor,
+      [candidate],
+      RelationCleanupOptions.Default with { UnprotectedOffMapWorldPawnThreshold = 1 });
+    Assert.Equal(0, deletedDisabled);
+    Assert.Equal(0, inspections);
+
+    RelationCleanupOptions thresholdTwo = RelationCleanupOptions.Default with
+    {
+      DeleteUnprotectedOffMapWorldPawns = true,
+      UnprotectedOffMapWorldPawnThreshold = 2,
+    };
+    int deletedBelowTotal = RelationCleanupEngine.PruneUnprotectedOffMapWorldPawns(
+      accessor,
+      [candidate],
+      thresholdTwo);
+    Assert.Equal(0, deletedBelowTotal);
+    Assert.Equal(0, inspections);
+  }
+
+  [Fact]
+  public void PruneUnprotectedOffMapWorldPawns_DoesNotDeleteWhenEligibleBelowThreshold()
+  {
+    var eligible = new FakeWorldPawn(
+      "Eligible",
+      new WorldPawnPruneInfo(WorldOffMapRole, false, false, false));
+    var onMap = new FakeWorldPawn(
+      "OnMap",
+      new WorldPawnPruneInfo(WorldOnMapRole, true, false, false));
+    var leader = new FakeWorldPawn(
+      "Leader",
+      new WorldPawnPruneInfo(new PawnRoleInfo(false, false, false, false, false, true), false, false, false));
+    var questPawn = new FakeWorldPawn(
+      "Quest",
+      new WorldPawnPruneInfo(WorldOffMapRole, false, true, false));
+    var related = new FakeWorldPawn(
+      "Related",
+      new WorldPawnPruneInfo(WorldOffMapRole, false, false, true));
+
+    int? notifiedCount = null;
+    RelationCleanupOptions options = RelationCleanupOptions.Default with
+    {
+      DeleteUnprotectedOffMapWorldPawns = true,
+      UnprotectedOffMapWorldPawnThreshold = 2,
+    };
+
+    int deleted = RelationCleanupEngine.PruneUnprotectedOffMapWorldPawns(
+      new FakeWorldPawnPruneAccessor(),
+      [eligible, onMap, leader, questPawn, related],
+      options,
+      c => notifiedCount = c);
+
+    Assert.Equal(0, deleted);
+    Assert.Null(notifiedCount);
+    Assert.False(eligible.Discarded);
+    Assert.False(onMap.Discarded);
+    Assert.False(leader.Discarded);
+    Assert.False(questPawn.Discarded);
+    Assert.False(related.Discarded);
+  }
+
+  [Fact]
+  public void PruneUnprotectedOffMapWorldPawns_DeletesAllEligibleAtOrAboveThreshold_AndReportsCount()
+  {
+    var eligible1 = new FakeWorldPawn(
+      "Eligible1",
+      new WorldPawnPruneInfo(WorldOffMapRole, false, false, false));
+    var eligible2 = new FakeWorldPawn(
+      "Eligible2",
+      new WorldPawnPruneInfo(WorldOffMapRole, false, false, false));
+    var eligible3 = new FakeWorldPawn(
+      "Eligible3",
+      new WorldPawnPruneInfo(new PawnRoleInfo(false, false, true, false, false, false), false, false, false));
+    var colonist = new FakeWorldPawn(
+      "Colonist",
+      new WorldPawnPruneInfo(new PawnRoleInfo(true, true, false, false, false, false), false, false, false));
+    var questPawn = new FakeWorldPawn(
+      "Quest",
+      new WorldPawnPruneInfo(WorldOffMapRole, false, true, false));
+    var related = new FakeWorldPawn(
+      "Related",
+      new WorldPawnPruneInfo(WorldOffMapRole, false, false, true));
+
+    var notifications = new List<int>();
+    var logs = new List<string>();
+    RelationCleanupOptions options = RelationCleanupOptions.Default with
+    {
+      DeleteUnprotectedOffMapWorldPawns = true,
+      UnprotectedOffMapWorldPawnThreshold = 2,
+      VerboseLogging = true,
+    };
+
+    int deleted = RelationCleanupEngine.PruneUnprotectedOffMapWorldPawns(
+      new FakeWorldPawnPruneAccessor(),
+      [eligible1, colonist, eligible2, questPawn, related, eligible3],
+      options,
+      notifications.Add,
+      logs.Add);
+
+    Assert.Equal(3, deleted);
+    Assert.Equal([3], notifications);
+    Assert.Equal(3, logs.Count);
+    Assert.True(eligible1.Discarded);
+    Assert.True(eligible2.Discarded);
+    Assert.True(eligible3.Discarded);
+    Assert.False(colonist.Discarded);
+    Assert.False(questPawn.Discarded);
+    Assert.False(related.Discarded);
+  }
+
+  [Fact]
+  public void PruneUnprotectedOffMapWorldPawns_DoesNotNotifyWhenAllDiscardsFail()
+  {
+    var eligible1 = new FakeWorldPawn(
+      "E1",
+      new WorldPawnPruneInfo(WorldOffMapRole, false, false, false))
+    {
+      AllowDiscard = false,
+    };
+    var eligible2 = new FakeWorldPawn(
+      "E2",
+      new WorldPawnPruneInfo(WorldOffMapRole, false, false, false))
+    {
+      AllowDiscard = false,
+    };
+
+    var notifications = new List<int>();
+    RelationCleanupOptions options = RelationCleanupOptions.Default with
+    {
+      DeleteUnprotectedOffMapWorldPawns = true,
+      UnprotectedOffMapWorldPawnThreshold = 2,
+    };
+
+    int deleted = RelationCleanupEngine.PruneUnprotectedOffMapWorldPawns(
+      new FakeWorldPawnPruneAccessor(),
+      [eligible1, eligible2],
+      options,
+      notifications.Add);
+
+    Assert.Equal(0, deleted);
+    Assert.Empty(notifications);
+  }
+
+  [Fact]
+  public void PruneUnprotectedOffMapWorldPawns_StopsScanningEarlyWhenRemainingCannotReachThreshold()
+  {
+    int inspections = 0;
+    var accessor = new FakeWorldPawnPruneAccessor(() => inspections++);
+    var protectedInfo = new WorldPawnPruneInfo(WorldOnMapRole, true, false, false);
+    var eligibleInfo = new WorldPawnPruneInfo(WorldOffMapRole, false, false, false);
+
+    // Total = 4, threshold = 3. After 2 protected pawns, remaining 2 cannot reach 3.
+    var pawns = new[]
+    {
+      new FakeWorldPawn("Protected1", protectedInfo),
+      new FakeWorldPawn("Protected2", protectedInfo),
+      new FakeWorldPawn("Eligible1", eligibleInfo),
+      new FakeWorldPawn("Eligible2", eligibleInfo),
+    };
+
+    RelationCleanupOptions options = RelationCleanupOptions.Default with
+    {
+      DeleteUnprotectedOffMapWorldPawns = true,
+      UnprotectedOffMapWorldPawnThreshold = 3,
+    };
+
+    int deleted = RelationCleanupEngine.PruneUnprotectedOffMapWorldPawns(
+      accessor,
+      pawns,
+      options);
+
+    Assert.Equal(0, deleted);
+    Assert.Equal(2, inspections);
+  }
+
+  [Fact]
+  public async Task PruneUnprotectedOffMapWorldPawns_ConcurrentCalls_AreThreadSafe()
+  {
+    var pawns = Enumerable.Range(0, 60)
+      .Select(i => new FakeWorldPawn(
+        $"Pawn_{i}",
+        new WorldPawnPruneInfo(WorldOffMapRole, false, false, false)))
+      .ToList();
+
+    RelationCleanupOptions options = RelationCleanupOptions.Default with
+    {
+      DeleteUnprotectedOffMapWorldPawns = true,
+      UnprotectedOffMapWorldPawnThreshold = 10,
+    };
+
+    int totalReported = 0;
+    Task[] tasks = Enumerable.Range(0, 8)
+      .Select(_ => Task.Run(() =>
+      {
+        RelationCleanupEngine.PruneUnprotectedOffMapWorldPawns(
+          new FakeWorldPawnPruneAccessor(),
+          pawns,
+          options,
+          count => Interlocked.Add(ref totalReported, count));
+      }))
+      .ToArray();
+
+    await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(10));
+
+    Assert.Equal(60, totalReported);
+    Assert.All(pawns, p => Assert.True(p.Discarded));
+  }
 }

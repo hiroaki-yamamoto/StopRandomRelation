@@ -1,4 +1,5 @@
 using RimWorld;
+using RimWorld.Planet;
 using Verse;
 
 namespace Stop_Random_Relation;
@@ -71,10 +72,7 @@ public static class RelationshipManager
       return pawn.relations.TryRemoveDirectRelation(def, other);
     }
 
-    public string DescribePawn(Pawn? pawn)
-    {
-      return pawn == null ? "<null>" : $"{pawn.LabelShort} ({pawn.ThingID})";
-    }
+    public string DescribePawn(Pawn? pawn) => PawnStateEvaluator.DescribePawn(pawn);
 
     public string DescribeRelation(PawnRelationDef? def)
     {
@@ -82,8 +80,43 @@ public static class RelationshipManager
     }
   }
 
+  private readonly struct RimWorldWorldPawnPruneAccessor : IWorldPawnPruneAccessor<Pawn>
+  {
+    private readonly WorldPawns _worldPawns;
+    private readonly bool _protectLivingFactionLeaders;
+
+    public RimWorldWorldPawnPruneAccessor(
+      WorldPawns worldPawns,
+      bool protectLivingFactionLeaders)
+    {
+      _worldPawns = worldPawns;
+      _protectLivingFactionLeaders = protectLivingFactionLeaders;
+    }
+
+    public WorldPawnPruneInfo GetWorldPawnPruneInfo(Pawn? pawn) =>
+      PawnStateEvaluator.GetWorldPawnPruneInfo(pawn, _worldPawns, _protectLivingFactionLeaders);
+
+    public bool TryDiscardWorldPawn(Pawn pawn)
+    {
+      if (pawn == null
+        || pawn.Discarded
+        || !_worldPawns.Contains(pawn)
+        || _worldPawns.IsBeingDiscarded(pawn))
+      {
+        return false;
+      }
+
+      _worldPawns.RemoveAndDiscardPawnViaGC(pawn);
+      return true;
+    }
+
+    public string DescribePawn(Pawn? pawn) => PawnStateEvaluator.DescribePawn(pawn);
+  }
+
   private static readonly Action<string> VerboseLogger =
     msg => Log.Message($"[Stop Random Relation] {msg}");
+
+  private static readonly object WorldPawnMaintenanceLock = new();
 
   /// <summary>
   /// Severs all direct relations on <paramref name="pawn"/> matching
@@ -199,32 +232,101 @@ public static class RelationshipManager
       return 0;
     }
 
-    var worldPawns = Find.WorldPawns?.AllPawnsAliveOrDead;
-    if (worldPawns == null || worldPawns.Count == 0)
+    lock (WorldPawnMaintenanceLock)
     {
-      return 0;
-    }
-
-    // Copy only world pawns that have direct relations so empty pawns are skipped in O(1).
-    List<Pawn> candidates = new();
-    for (int i = 0; i < worldPawns.Count; i++)
-    {
-      Pawn? pawn = worldPawns[i];
-      if (pawn != null && default(RimWorldRelationAccessor).HasAnyDirectRelations(pawn))
+      var worldPawns = Find.WorldPawns?.AllPawnsAliveOrDead;
+      if (worldPawns == null || worldPawns.Count == 0)
       {
-        candidates.Add(pawn);
+        return 0;
       }
-    }
 
-    if (candidates.Count == 0)
+      // Copy only world pawns that have direct relations so empty pawns are skipped in O(1).
+      List<Pawn> candidates = new();
+      for (int i = 0; i < worldPawns.Count; i++)
+      {
+        Pawn? pawn = worldPawns[i];
+        if (pawn != null && default(RimWorldRelationAccessor).HasAnyDirectRelations(pawn))
+        {
+          candidates.Add(pawn);
+        }
+      }
+
+      if (candidates.Count == 0)
+      {
+        return 0;
+      }
+
+      return RelationCleanupEngine.CleanOffMapWorldPawns<Pawn, PawnRelationDef, RimWorldRelationAccessor>(
+        default,
+        candidates,
+        options,
+        options.VerboseLogging ? VerboseLogger : null);
+    }
+  }
+
+  /// <summary>
+  /// Evaluates world pawns and deletes all unprotected, off-map candidates
+  /// when their count reaches
+  /// <see cref="RelationCleanupOptions.UnprotectedOffMapWorldPawnThreshold"/>,
+  /// displaying an in-game message reporting the deleted count.
+  /// </summary>
+  /// <param name="options">Current mod configuration snapshot.</param>
+  /// <param name="onDeleted">
+  /// Optional callback overriding the default <see cref="Messages.Message(string, MessageTypeDef, bool)"/> notification.
+  /// </param>
+  /// <returns>The number of world pawns deleted.</returns>
+  public static int PruneExcessUnprotectedOffMapWorldPawns(
+    in RelationCleanupOptions options,
+    Action<int>? onDeleted = null)
+  {
+    if (!options.ModEnabled || !options.DeleteUnprotectedOffMapWorldPawns)
     {
       return 0;
     }
 
-    return RelationCleanupEngine.CleanOffMapWorldPawns<Pawn, PawnRelationDef, RimWorldRelationAccessor>(
-      default,
-      candidates,
-      options,
-      options.VerboseLogging ? VerboseLogger : null);
+    int deletedCount;
+    lock (WorldPawnMaintenanceLock)
+    {
+      WorldPawns? worldPawns = Find.WorldPawns;
+      List<Pawn>? allPawns = worldPawns?.AllPawnsAliveOrDead;
+      if (worldPawns == null || allPawns == null || allPawns.Count == 0)
+      {
+        return 0;
+      }
+
+      int threshold = RelationCleanupOptions.ClampWorldPawnThreshold(
+        options.UnprotectedOffMapWorldPawnThreshold);
+      if (allPawns.Count < threshold)
+      {
+        return 0;
+      }
+
+      deletedCount = RelationCleanupEngine.PruneUnprotectedOffMapWorldPawns(
+        new RimWorldWorldPawnPruneAccessor(worldPawns, options.ProtectLivingFactionLeaders),
+        allPawns,
+        options,
+        onDeleted: null,
+        options.VerboseLogging ? VerboseLogger : null);
+    }
+
+    if (deletedCount > 0)
+    {
+      (onDeleted ?? NotifyWorldPawnsDeleted)(deletedCount);
+    }
+
+    return deletedCount;
+  }
+
+  private static void NotifyWorldPawnsDeleted(int deletedCount)
+  {
+    if (deletedCount <= 0 || Current.ProgramState != ProgramState.Playing)
+    {
+      return;
+    }
+
+    Messages.Message(
+      "SRR_WorldPawnsDeletedMessage".Translate(deletedCount),
+      MessageTypeDefOf.NeutralEvent,
+      historical: true);
   }
 }

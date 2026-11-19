@@ -318,4 +318,71 @@ public class RelationCleanupPolicyTests
       LivingFactionLeader,
       disabledMod));
   }
+
+  [Fact]
+  public void ShouldDeleteWorldPawnOnThreshold_RespectsFeatureAndModToggles()
+  {
+    var eligible = new WorldPawnPruneInfo(
+      OffMapWorldPawn,
+      IsOnAnyMap: false,
+      IsProtectedByGameState: false,
+      HasAnyRelation: false);
+
+    Assert.False(RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(
+      eligible,
+      RelationCleanupOptions.Default));
+
+    RelationCleanupOptions enabled = RelationCleanupOptions.Default with
+    {
+      DeleteUnprotectedOffMapWorldPawns = true,
+    };
+    Assert.True(RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(eligible, enabled));
+
+    Assert.False(RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(
+      eligible,
+      enabled with { ModEnabled = false }));
+  }
+
+  [Fact]
+  public void ShouldDeleteWorldPawnOnThreshold_ProtectsMapColonistPlayerLeaderGameStateAndRelations()
+  {
+    RelationCleanupOptions enabled = RelationCleanupOptions.Default with
+    {
+      DeleteUnprotectedOffMapWorldPawns = true,
+    };
+
+    var baseInfo = new WorldPawnPruneInfo(
+      OffMapWorldPawn,
+      IsOnAnyMap: false,
+      IsProtectedByGameState: false,
+      HasAnyRelation: false);
+
+    Assert.False(RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(
+      baseInfo with { IsOnAnyMap = true },
+      enabled));
+    Assert.False(RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(
+      baseInfo with { Role = OnMapWorldPawn },
+      enabled));
+    Assert.False(RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(
+      baseInfo with { Role = CaravanColonist },
+      enabled));
+    Assert.False(RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(
+      baseInfo with { Role = PlayerAnimal },
+      enabled));
+    Assert.False(RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(
+      baseInfo with { Role = LivingFactionLeader },
+      enabled));
+    Assert.True(RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(
+      baseInfo with { Role = LivingFactionLeader },
+      enabled with { ProtectLivingFactionLeaders = false }));
+    Assert.True(RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(
+      baseInfo with { Role = DeadFactionLeader },
+      enabled));
+    Assert.False(RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(
+      baseInfo with { IsProtectedByGameState = true },
+      enabled));
+    Assert.False(RelationCleanupPolicy.ShouldDeleteWorldPawnOnThreshold(
+      baseInfo with { HasAnyRelation = true },
+      enabled));
+  }
 }

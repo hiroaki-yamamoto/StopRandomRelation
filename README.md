@@ -17,6 +17,7 @@ While this surreal cosmic genealogy adds unintentional comedy to RimWorld's stor
 - **Colonist Relations**: Preserves blood and spouse relations between living or resurrectable colonists, and severs them once a deceased colonist's corpse is desiccated, butchered, cremated, or permanently destroyed.
 - **Visitor & Raider Relations**: Preserves colonist-to-world-pawn relations while the relative is alive on a colonist map, and severs them immediately upon map departure or death (or when the colonist dies).
 - **World Pawn Relations**: Preserves world-pawn-to-world-pawn relations while both are alive on a colonist map, and severs relations when either leaves/dies or when neither is on a colonist map.
+- **Unprotected Off-Map World Pawn Pruning**: Optionally deletes all unprotected off-map world pawns (excluding colonists, player-faction pawns, protected living faction leaders, pawns with preserved relations, and essential quest/caravan/kidnapped pawns) once their count reaches a configurable threshold, and notifies you with the deleted count.
 - **Faction Leader Protection**: Protects living faction leaders from `WorldPawnGC` even when they have no remaining family ties.
 - **Marriage & Romance Cleanup**: Optionally applies cleanup rules to spouse, fiance, lover, ex-spouse, and ex-lover relations in addition to blood relations (animal bonds and mechanitor overseer links are never removed).
 - **Immediate Mod Settings**: All rules are configurable in Mod Settings and take effect immediately without restarting.
@@ -48,6 +49,9 @@ You can configure all options under **Options > Mod Settings > Stop Random Relat
 - **World Pawn Relations**
   - **Clean world-pawn-to-world-pawn relations on map departure or death**: Maintains relations between world pawns while both are alive on a colonist map, and severs them once either leaves the map or dies.
   - **Sever off-map world pawn relations**: Severs relations between non-colonist world pawns neither of whom is present on a colonist map.
+  - **Off-map sweep interval (ticks, 0 = immediate)**: Interval in game ticks between periodic off-map relation sweeps and threshold deletions (default: `2500`). Setting `0` evaluates immediately when unprotected off-map world pawns reach the threshold.
+  - **Delete unprotected off-map world pawns at threshold**: When enabled (default: off), deletes all unprotected off-map world pawns once their count reaches the configured threshold and reports how many were deleted.
+  - **Unprotected off-map world pawn threshold**: Minimum number of unprotected off-map world pawns required to trigger deletion (default: `100`).
 - **Protection Rules**
   - **Protect living faction leaders from garbage collection**: Ensures living faction leaders are never discarded by `WorldPawnGC` even when they have no remaining family ties.
   - **Include marriage / spouse relations in cleanup**: Applies cleanup rules to spouse, fiance, lover, ex-spouse, and ex-lover relations in addition to blood relations.
