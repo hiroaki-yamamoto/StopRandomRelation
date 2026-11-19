@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LanguageData>
+  <SRR_SettingsCategory>Stop Random Relation</SRR_SettingsCategory>
+
+  <SRR_ModEnabled_Label>Enable Stop Random Relation</SRR_ModEnabled_Label>
+  <SRR_ModEnabled_Tip>Master switch to toggle all relation pruning and WorldPawnGC protections. Changes take effect immediately.</SRR_ModEnabled_Tip>
+
+  <SRR_Section_ColonistRelations>Colonist Relations</SRR_Section_ColonistRelations>
+  <SRR_CleanColonistOnPermDeath_Label>Clean relations when colonist corpse cannot be resurrected</SRR_CleanColonistOnPermDeath_Label>
+  <SRR_CleanColonistOnPermDeath_Tip>Severs relations between colonists once a deceased colonist's corpse is desiccated, butchered, cremated, or permanently destroyed.</SRR_CleanColonistOnPermDeath_Tip>
+
+  <SRR_Section_VisitorRaiderRelations>Visitor &amp; Raider Relations</SRR_Section_VisitorRaiderRelations>
+  <SRR_CleanColonistToWorld_Label>Clean colonist-to-world-pawn relations on map departure or death</SRR_CleanColonistToWorld_Label>
+  <SRR_CleanColonistToWorld_Tip>Maintains relationships while world-pawn relatives are alive on a colonist map, and severs them once they exit the map or die (or when the colonist dies).</SRR_CleanColonistToWorld_Tip>
+
+  <SRR_Section_WorldPawnRelations>World Pawn Relations</SRR_Section_WorldPawnRelations>
+  <SRR_CleanWorldToWorld_Label>Clean world-pawn-to-world-pawn relations on map departure or death</SRR_CleanWorldToWorld_Label>
+  <SRR_CleanWorldToWorld_Tip>Maintains relations between world pawns while both are alive on a colonist map, and severs them once either leaves the map or dies.</SRR_CleanWorldToWorld_Tip>
+  <SRR_CleanOffMapWorldPawns_Label>Sever off-map world pawn relations</SRR_CleanOffMapWorldPawns_Label>
+  <SRR_CleanOffMapWorldPawns_Tip>Severs relations between non-colonist world pawns neither of whom is present on a colonist map.</SRR_CleanOffMapWorldPawns_Tip>
+
+  <SRR_Section_ProtectionRules>Protection Rules</SRR_Section_ProtectionRules>
+  <SRR_ProtectFactionLeaders_Label>Protect living faction leaders from garbage collection</SRR_ProtectFactionLeaders_Label>
+  <SRR_ProtectFactionLeaders_Tip>Ensures living faction leaders are never discarded by WorldPawnGC even when they have no remaining family ties.</SRR_ProtectFactionLeaders_Tip>
+  <SRR_IncludeNonBlood_Label>Include marriage / spouse relations in cleanup</SRR_IncludeNonBlood_Label>
+  <SRR_IncludeNonBlood_Tip>Applies cleanup rules to spouse, fiance, lover, ex-spouse, and ex-lover relations in addition to blood relations. Animal bonds and mechanitor overseer links are never removed.</SRR_IncludeNonBlood_Tip>
+
+  <SRR_Section_Debugging>Debugging</SRR_Section_Debugging>
+  <SRR_VerboseLogging_Label>Verbose logging</SRR_VerboseLogging_Label>
+  <SRR_VerboseLogging_Tip>Outputs relationship severing and GC protection details to the RimWorld developer log.</SRR_VerboseLogging_Tip>
+
+  <SRR_ResetDefaults>Reset to defaults</SRR_ResetDefaults>
+</LanguageData>

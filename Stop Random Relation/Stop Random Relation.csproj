@@ -1,0 +1,36 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Stop_Random_Relation</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Version>1.7</Version>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Krafs.Rimworld.Ref" Version="1.7.5013-unstable" ExcludeAssets="runtime" />
+    <PackageReference Include="Lib.Harmony" Version="3.0.0-rc.7" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+      <DebugSymbols>true</DebugSymbols>
+      <DebugType>portable</DebugType>
+      <Optimize>false</Optimize>
+      <DefineConstants>DEBUG</DefineConstants>
+      <WarningLevel>4</WarningLevel>
+      <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <!-- Release configuration -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+      <DebugType>embedded</DebugType>
+      <Optimize>true</Optimize>
+      <OutputPath>..\$(Version)\Assemblies\</OutputPath>
+      <WarningLevel>4</WarningLevel>
+      <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+
+</Project>

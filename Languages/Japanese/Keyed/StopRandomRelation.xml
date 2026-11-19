@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LanguageData>
+  <SRR_SettingsCategory>Stop Random Relation</SRR_SettingsCategory>
+
+  <SRR_ModEnabled_Label>Stop Random Relation を有効にする</SRR_ModEnabled_Label>
+  <SRR_ModEnabled_Tip>すべての血縁・婚姻関係の整理と WorldPawnGC 保護を切り替えるマスタースイッチです。変更は即座に反映されます。</SRR_ModEnabled_Tip>
+
+  <SRR_Section_ColonistRelations>入植者同士の関係</SRR_Section_ColonistRelations>
+  <SRR_CleanColonistOnPermDeath_Label>蘇生不可能な死亡時に血縁関係を整理する</SRR_CleanColonistOnPermDeath_Label>
+  <SRR_CleanColonistOnPermDeath_Tip>死亡した入植者の遺体が白骨化・解体・火葬などで蘇生不可能になった際、生存している入植者との関係を削除します。</SRR_CleanColonistOnPermDeath_Tip>
+
+  <SRR_Section_VisitorRaiderRelations>訪問者・襲撃者との関係</SRR_Section_VisitorRaiderRelations>
+  <SRR_CleanColonistToWorld_Label>マップ離脱・死亡時に入植者とワールドポーンの関係を整理する</SRR_CleanColonistToWorld_Label>
+  <SRR_CleanColonistToWorld_Tip>親族であるワールドポーンが入植者マップ上に生存している間は関係を維持し、マップ離脱または死亡時（および入植者死亡時）に関係を削除します。</SRR_CleanColonistToWorld_Tip>
+
+  <SRR_Section_WorldPawnRelations>ワールドポーン同士の関係</SRR_Section_WorldPawnRelations>
+  <SRR_CleanWorldToWorld_Label>マップ離脱・死亡時にワールドポーン同士の関係を整理する</SRR_CleanWorldToWorld_Label>
+  <SRR_CleanWorldToWorld_Tip>両者が入植者マップ上に生存している間は関係を維持し、どちらかがマップ離脱または死亡した際に関係を削除します。</SRR_CleanWorldToWorld_Tip>
+  <SRR_CleanOffMapWorldPawns_Label>マップ外のワールドポーン同士の関係を削除する</SRR_CleanOffMapWorldPawns_Label>
+  <SRR_CleanOffMapWorldPawns_Tip>どちらも入植者マップ上に存在しないワールドポーン同士の関係を削除し、GC 対象にします。</SRR_CleanOffMapWorldPawns_Tip>
+
+  <SRR_Section_ProtectionRules>保護ルール</SRR_Section_ProtectionRules>
+  <SRR_ProtectFactionLeaders_Label>生存中の派閥リーダーを GC から保護する</SRR_ProtectFactionLeaders_Label>
+  <SRR_ProtectFactionLeaders_Tip>生存中の派閥リーダーが血縁関係を失っても WorldPawnGC によって破棄されないようにします。</SRR_ProtectFactionLeaders_Tip>
+  <SRR_IncludeNonBlood_Label>婚姻・恋愛関係も整理対象に含める</SRR_IncludeNonBlood_Label>
+  <SRR_IncludeNonBlood_Tip>血縁関係に加えて、配偶者・婚約者・恋人・元配偶者・元恋人の関係も整理対象にします（動物との絆やメカノイドの監視リンクは対象外です）。</SRR_IncludeNonBlood_Tip>
+
+  <SRR_Section_Debugging>デバッグ</SRR_Section_Debugging>
+  <SRR_VerboseLogging_Label>詳細ログを出力する</SRR_VerboseLogging_Label>
+  <SRR_VerboseLogging_Tip>関係の削除および GC 保護の詳細を開発者コンソールに出力します。</SRR_VerboseLogging_Tip>
+
+  <SRR_ResetDefaults>デフォルトに戻す</SRR_ResetDefaults>
+</LanguageData>

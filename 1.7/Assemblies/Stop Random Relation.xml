@@ -1,0 +1,746 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Stop Random Relation</name>
+    </assembly>
+    <members>
+        <member name="T:Stop_Random_Relation.HarmonyPatches">
+            <summary>
+            Harmony patch definitions hooking pawn map exit, death, corpse
+            destruction/desiccation, and <c>WorldPawnGC</c> lifecycle events.
+            </summary>
+        </member>
+        <member name="T:Stop_Random_Relation.HarmonyPatches.Pawn_ExitMap_Patch">
+            <summary>
+            Triggers relation cleanup when a non-player pawn exits a map.
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.HarmonyPatches.Pawn_ExitMap_Patch.Postfix(Verse.Pawn)">
+            <summary>
+            Postfix executed after <see cref="M:Verse.Pawn.ExitMap(System.Boolean,Verse.Rot4)"/> completes.
+            </summary>
+            <param name="__instance">The pawn that exited the map.</param>
+        </member>
+        <member name="T:Stop_Random_Relation.HarmonyPatches.Pawn_Kill_Patch">
+            <summary>
+            Triggers relation cleanup when a pawn dies.
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.HarmonyPatches.Pawn_Kill_Patch.Postfix(Verse.Pawn)">
+            <summary>
+            Postfix executed after <see cref="M:Verse.Pawn.Kill(System.Nullable{Verse.DamageInfo},Verse.Hediff)"/> completes.
+            </summary>
+            <param name="__instance">The pawn that was killed.</param>
+        </member>
+        <member name="T:Stop_Random_Relation.HarmonyPatches.Corpse_Destroy_Patch">
+            <summary>
+            Triggers permanent-death relation cleanup right before a corpse is
+            destroyed (cremated, butchered, consumed, or vanished).
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.HarmonyPatches.Corpse_Destroy_Patch.Prefix(Verse.Corpse)">
+            <summary>
+            Prefix executed before <see cref="M:Verse.Corpse.Destroy(Verse.DestroyMode)"/> clears
+            the inner pawn reference.
+            </summary>
+            <param name="__instance">The corpse being destroyed.</param>
+        </member>
+        <member name="T:Stop_Random_Relation.HarmonyPatches.Corpse_RotStageChanged_Patch">
+            <summary>
+            Triggers permanent-death relation cleanup when a corpse rots to a
+            non-resurrectable stage (such as desiccation).
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.HarmonyPatches.Corpse_RotStageChanged_Patch.Postfix(Verse.Corpse)">
+            <summary>
+            Postfix executed after <see cref="M:Verse.Corpse.RotStageChanged"/> updates the
+            corpse's rot stage.
+            </summary>
+            <param name="__instance">The corpse whose rot stage changed.</param>
+        </member>
+        <member name="T:Stop_Random_Relation.HarmonyPatches.WorldPawnGC_GetCriticalPawnReason_Patch">
+            <summary>
+            Ensures living faction leaders are never discarded by <c>WorldPawnGC</c>,
+            even when all blood and marriage relations have been pruned.
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.HarmonyPatches.WorldPawnGC_GetCriticalPawnReason_Patch.Postfix(Verse.Pawn,System.String@)">
+            <summary>
+            Postfix enforcing critical retention reason for living faction leaders.
+            </summary>
+            <param name="pawn">The world pawn being evaluated by GC.</param>
+            <param name="__result">The retention reason returned by RimWorld.</param>
+        </member>
+        <member name="T:Stop_Random_Relation.HarmonyPatches.WorldPawnGC_AccumulatePawnGCData_Patch">
+            <summary>
+            Sweeps off-map world pawn relations immediately before <c>WorldPawnGC</c>
+            accumulates kept pawns, ensuring newly orphaned world pawns are discarded
+            in the current GC pass.
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.HarmonyPatches.WorldPawnGC_AccumulatePawnGCData_Patch.Prefix">
+            <summary>
+            Prefix executed at the beginning of GC data accumulation.
+            </summary>
+        </member>
+        <member name="T:Stop_Random_Relation.HarmonyPatches.WorldPawns_WorldPawnsTick_Patch">
+            <summary>
+            Periodically cleans stale off-map world pawn relations during world ticking
+            so off-map relations generated during quests or world events are pruned
+            promptly without waiting for the full 15,000-tick GC cycle.
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.HarmonyPatches.WorldPawns_WorldPawnsTick_Patch.Postfix">
+            <summary>
+            Postfix executed on <see cref="M:RimWorld.Planet.WorldPawns.WorldPawnsTick"/>.
+            </summary>
+        </member>
+        <member name="T:Stop_Random_Relation.PawnStateEvaluator">
+            <summary>
+            Pure domain predicates inspecting RimWorld <see cref="T:Verse.Pawn"/>,
+            <see cref="T:Verse.Map"/>, and <see cref="T:RimWorld.PawnRelationDef"/> state.
+            </summary>
+            <remarks>
+            All predicate evaluations run in <c>O(1)</c> time and <c>O(1)</c> space.
+            </remarks>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.IsColonist(Verse.Pawn)">
+            <summary>
+            Determines whether <paramref name="pawn"/> is a free colonist belonging
+            to the player's faction.
+            </summary>
+            <param name="pawn">The pawn to evaluate.</param>
+            <returns><c>true</c> if the pawn is a player colonist; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.IsPlayerFaction(Verse.Pawn)">
+            <summary>
+            Determines whether <paramref name="pawn"/> belongs to the player's faction
+            (including colonists, colony animals, and player-controlled mechanoids).
+            </summary>
+            <param name="pawn">The pawn to evaluate.</param>
+            <returns><c>true</c> if the pawn's faction is the player faction.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.IsColonistMap(Verse.Map)">
+            <summary>
+            Determines whether <paramref name="map"/> is an active colonist map
+            (either a player home map or any active map containing free colonists).
+            </summary>
+            <param name="map">The map to evaluate.</param>
+            <returns><c>true</c> if the map is a colonist map; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.IsOnColonistMap(Verse.Pawn)">
+            <summary>
+            Determines whether <paramref name="pawn"/> is currently spawned or held
+            (e.g., carried or in a bed/container) on an active colonist map.
+            </summary>
+            <param name="pawn">The pawn to evaluate.</param>
+            <returns><c>true</c> if the pawn is present on a colonist map; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.IsResurrectable(Verse.Pawn)">
+            <summary>
+            Determines whether a deceased <paramref name="pawn"/> still has a corpse
+            capable of being resurrected (not destroyed, discarded, or desiccated).
+            </summary>
+            <param name="pawn">The deceased pawn to evaluate.</param>
+            <returns>
+            <c>true</c> if <paramref name="pawn"/> is dead and still resurrectable;
+            <c>false</c> if alive or permanently unresurrectable.
+            </returns>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.IsUnresurrectable(Verse.Pawn)">
+            <summary>
+            Determines whether <paramref name="pawn"/> is dead and can no longer be
+            resurrected.
+            </summary>
+            <param name="pawn">The pawn to evaluate.</param>
+            <returns><c>true</c> if dead and unresurrectable; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.IsActiveFactionLeader(Verse.Pawn)">
+            <summary>
+            Determines whether <paramref name="pawn"/> is the living leader of an
+            active faction.
+            </summary>
+            <param name="pawn">The pawn to evaluate.</param>
+            <returns><c>true</c> if the pawn is a living faction leader; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.GetRelationCategory(RimWorld.PawnRelationDef)">
+            <summary>
+            Classifies a RimWorld <see cref="T:RimWorld.PawnRelationDef"/> into a
+            <see cref="T:Stop_Random_Relation.RelationCategory"/> for policy evaluation.
+            </summary>
+            <param name="def">The relation definition to classify.</param>
+            <returns>
+            <see cref="F:Stop_Random_Relation.RelationCategory.Blood"/> for biological blood relations,
+            <see cref="F:Stop_Random_Relation.RelationCategory.MarriageOrRomance"/> for spouse/romance
+            relations, or <see cref="F:Stop_Random_Relation.RelationCategory.None"/> otherwise.
+            </returns>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnStateEvaluator.GetRoleInfo(Verse.Pawn)">
+            <summary>
+            Projects a live RimWorld <see cref="T:Verse.Pawn"/> into an immutable
+            <see cref="T:Stop_Random_Relation.PawnRoleInfo"/> value for policy evaluation.
+            </summary>
+            <param name="pawn">The pawn to inspect.</param>
+            <returns>An immutable <see cref="T:Stop_Random_Relation.PawnRoleInfo"/> snapshot.</returns>
+        </member>
+        <member name="T:Stop_Random_Relation.RelationCleanupEngine">
+            <summary>
+            Thread-safe, zero-reflection relationship pruning engine parameterized by an
+            <see cref="T:Stop_Random_Relation.IRelationAccessor`2"/> struct adapter.
+            </summary>
+            <remarks>
+            <para>
+            Time complexity per event is <c>O(R)</c>, where <c>R</c> is the number of
+            direct relations on the evaluated pawn. Off-map sweep complexity is
+            <c>O(N + K * R)</c>, where <c>N</c> is total world pawns and <c>K</c> is
+            the number of world pawns that actually have direct relations.
+            </para>
+            <para>
+            Auxiliary space is amortized <c>O(1)</c> on repeated invocations via
+            thread-local buffer reuse (rent/return for re-entrancy safety). Concurrent
+            modifications to both endpoints use canonical lock ordering via
+            <see cref="M:System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(System.Object)"/> to eliminate deadlocks.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationCleanupEngine.SeverRelations``3(``2,``0,System.Func{``1,System.Boolean},System.Action{System.String})">
+            <summary>
+            Evaluates all direct relations on <paramref name="subject"/> and severs
+            both sides of every relation matching <paramref name="predicate"/>.
+            </summary>
+            <typeparam name="TPawn">The pawn type.</typeparam>
+            <typeparam name="TRelationDef">The relation definition type.</typeparam>
+            <typeparam name="TAccessor">Struct adapter type.</typeparam>
+            <param name="accessor">Adapter instance.</param>
+            <param name="subject">The pawn whose relations are evaluated.</param>
+            <param name="predicate">Filter determining whether a relation def should be removed.</param>
+            <param name="logAction">Optional callback invoked per severed relation when logging is enabled.</param>
+            <returns>The number of direct relationships severed.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationCleanupEngine.CleanForTrigger``3(``2,``0,Stop_Random_Relation.RelationTrigger,Stop_Random_Relation.RelationCleanupOptions@,System.Action{System.String})">
+            <summary>
+            Evaluates all direct relations on <paramref name="subject"/> against
+            <see cref="T:Stop_Random_Relation.RelationCleanupPolicy"/> for the specified <paramref name="trigger"/>
+            and severs invalid relations atomically on both pawns.
+            </summary>
+            <typeparam name="TPawn">The pawn type.</typeparam>
+            <typeparam name="TRelationDef">The relation definition type.</typeparam>
+            <typeparam name="TAccessor">Struct adapter type.</typeparam>
+            <param name="accessor">Adapter instance.</param>
+            <param name="subject">The pawn triggering evaluation.</param>
+            <param name="trigger">The lifecycle trigger.</param>
+            <param name="options">Current mod configuration snapshot.</param>
+            <param name="logAction">Optional callback invoked per severed relation when verbose logging is enabled.</param>
+            <returns>The number of relationships severed.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationCleanupEngine.CleanOffMapWorldPawns``3(``2,System.Collections.Generic.IReadOnlyList{``0},Stop_Random_Relation.RelationCleanupOptions@,System.Action{System.String})">
+            <summary>
+            Sweeps a list of world pawns and severs relations between non-colonist,
+            off-map world pawns (and pre-existing unresurrectable dead colonists).
+            </summary>
+            <typeparam name="TPawn">The pawn type.</typeparam>
+            <typeparam name="TRelationDef">The relation definition type.</typeparam>
+            <typeparam name="TAccessor">Struct adapter type.</typeparam>
+            <param name="accessor">Adapter instance.</param>
+            <param name="worldPawns">World pawns snapshot to evaluate.</param>
+            <param name="options">Current mod configuration snapshot.</param>
+            <param name="logAction">Optional callback invoked per severed relation.</param>
+            <returns>Total number of relationships severed across the sweep.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationCleanupEngine.SeverPairAtomically``3(``2,``0,``1,``0)">
+            <summary>
+            Removes a direct relation between <paramref name="pawnA"/> and <paramref name="pawnB"/>
+            atomically, acquiring locks in canonical object order to prevent deadlocks.
+            </summary>
+        </member>
+        <member name="T:Stop_Random_Relation.RelationCleanupOptions">
+            <summary>
+            Immutable, thread-safe snapshot of all Stop Random Relation settings.
+            </summary>
+            <remarks>
+            Reading an immutable value snapshot avoids torn reads and lock contention
+            when evaluation occurs across simulation or worker threads.
+            </remarks>
+        </member>
+        <member name="P:Stop_Random_Relation.RelationCleanupOptions.Default">
+            <summary>
+            Gets the default configuration matching the specification defaults.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.RelationCleanupOptions.ModEnabled">
+            <summary>
+            Gets a value indicating whether the mod's pruning and GC hooks are active.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.RelationCleanupOptions.CleanColonistRelationsOnPermanentDeath">
+            <summary>
+            Gets a value indicating whether relations of deceased colonists are severed
+            once their corpses can no longer be resurrected.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.RelationCleanupOptions.CleanColonistToWorldRelationsOnExitOrDeath">
+            <summary>
+            Gets a value indicating whether colonist-to-world-pawn relations are
+            severed when the relative exits a colonist map or either pawn dies.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.RelationCleanupOptions.CleanWorldToWorldRelationsOnExitOrDeath">
+            <summary>
+            Gets a value indicating whether world-pawn-to-world-pawn relations on
+            colonist maps are severed when either pawn exits or dies.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.RelationCleanupOptions.CleanOffMapWorldPawnRelations">
+            <summary>
+            Gets a value indicating whether relations between off-map world pawns are
+            severed during GC preparation and periodic maintenance sweeps.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.RelationCleanupOptions.ProtectLivingFactionLeaders">
+            <summary>
+            Gets a value indicating whether living faction leaders are strictly
+            protected from <c>WorldPawnGC</c> even with zero relations.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.RelationCleanupOptions.IncludeNonBloodRelations">
+            <summary>
+            Gets a value indicating whether marriage and romance relations (spouse,
+            fiance, lover, ex-spouse, ex-lover) are cleaned alongside blood relations.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.RelationCleanupOptions.VerboseLogging">
+            <summary>
+            Gets a value indicating whether diagnostic logs are emitted to the
+            RimWorld console when relations are severed or leaders are protected.
+            </summary>
+        </member>
+        <member name="T:Stop_Random_Relation.RelationCleanupPolicy">
+            <summary>
+            Pure, thread-safe domain policy determining whether relations should be severed
+            and whether world pawns must be protected from garbage collection.
+            </summary>
+            <remarks>
+            All methods are O(1) time and O(1) space pure functions operating solely on
+            immutable value snapshots (<see cref="T:Stop_Random_Relation.PawnRoleInfo"/> and <see cref="T:Stop_Random_Relation.RelationCleanupOptions"/>).
+            </remarks>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationCleanupPolicy.IsTargetRelation(Stop_Random_Relation.RelationCategory,Stop_Random_Relation.RelationCleanupOptions@)">
+            <summary>
+            Determines whether a relation category is eligible for cleanup under the
+            provided <paramref name="options"/>.
+            </summary>
+            <param name="category">The classified relation category.</param>
+            <param name="options">Current mod configuration snapshot.</param>
+            <returns><c>true</c> if the relation category is managed by cleanup rules.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationCleanupPolicy.ShouldSeverRelation(Stop_Random_Relation.PawnRoleInfo@,Stop_Random_Relation.PawnRoleInfo@,Stop_Random_Relation.RelationCategory,Stop_Random_Relation.RelationTrigger,Stop_Random_Relation.RelationCleanupOptions@)">
+            <summary>
+            Evaluates whether a direct relation between <paramref name="subject"/> and
+            <paramref name="other"/> must be severed for the given lifecycle <paramref name="trigger"/>.
+            </summary>
+            <param name="subject">The pawn undergoing the lifecycle event or sweep.</param>
+            <param name="other">The related pawn on the opposite end of the relation.</param>
+            <param name="category">Classification of the relation definition.</param>
+            <param name="trigger">Lifecycle event causing evaluation.</param>
+            <param name="options">Current mod configuration snapshot.</param>
+            <returns><c>true</c> if the relation should be severed; otherwise <c>false</c>.</returns>
+            <example>
+            <code>
+            var colonist = new PawnRoleInfo(true, true, false, false, true, false);
+            var raider = new PawnRoleInfo(false, false, false, false, false, false);
+            bool sever = RelationCleanupPolicy.ShouldSeverRelation(
+              raider, colonist, RelationCategory.Blood, RelationTrigger.MapExit,
+              RelationCleanupOptions.Default);
+            // sever == true
+            </code>
+            </example>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationCleanupPolicy.ShouldProtectFromGC(Stop_Random_Relation.PawnRoleInfo@,Stop_Random_Relation.RelationCleanupOptions@)">
+            <summary>
+            Determines whether a world pawn must be strictly protected from
+            <c>WorldPawnGC</c> discarding.
+            </summary>
+            <param name="pawn">Role snapshot of the evaluated world pawn.</param>
+            <param name="options">Current mod configuration snapshot.</param>
+            <returns><c>true</c> if GC must retain the pawn; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="T:Stop_Random_Relation.RelationTrigger">
+            <summary>
+            Represents the lifecycle event that triggered relationship evaluation.
+            </summary>
+        </member>
+        <member name="F:Stop_Random_Relation.RelationTrigger.MapExit">
+            <summary>
+            A pawn exited a map and returned to the world pool.
+            </summary>
+        </member>
+        <member name="F:Stop_Random_Relation.RelationTrigger.Death">
+            <summary>
+            A pawn died (<c>Pawn.Kill</c>).
+            </summary>
+        </member>
+        <member name="F:Stop_Random_Relation.RelationTrigger.PermanentDeath">
+            <summary>
+            A deceased pawn's corpse was destroyed or desiccated beyond revival.
+            </summary>
+        </member>
+        <member name="F:Stop_Random_Relation.RelationTrigger.OffMapSweep">
+            <summary>
+            Periodic or pre-GC sweep of world pawns outside colonist maps.
+            </summary>
+        </member>
+        <member name="T:Stop_Random_Relation.RelationCategory">
+            <summary>
+            Broad classification of a <c>PawnRelationDef</c> for cleanup filtering.
+            </summary>
+        </member>
+        <member name="F:Stop_Random_Relation.RelationCategory.None">
+            <summary>
+            Unrelated or non-targeted relation (e.g., animal Bond or Mechanitor Overseer).
+            </summary>
+        </member>
+        <member name="F:Stop_Random_Relation.RelationCategory.Blood">
+            <summary>
+            Biological family relation (<c>familyByBloodRelation</c> or <c>ParentBirth</c>).
+            </summary>
+        </member>
+        <member name="F:Stop_Random_Relation.RelationCategory.MarriageOrRomance">
+            <summary>
+            Marriage or romantic affinity relation (Spouse, Fiance, Lover, ExSpouse, ExLover).
+            </summary>
+        </member>
+        <member name="T:Stop_Random_Relation.PawnRoleInfo">
+            <summary>
+            Pure-value projection of a pawn's domain state used by cleanup policies.
+            </summary>
+            <param name="IsColonist">
+            <c>true</c> if the pawn is a free colonist belonging to the player faction.
+            </param>
+            <param name="IsPlayerFaction">
+            <c>true</c> if the pawn belongs to the player faction (including colony animals/mechs).
+            </param>
+            <param name="IsDead">
+            <c>true</c> if the pawn is currently dead.
+            </param>
+            <param name="IsResurrectable">
+            <c>true</c> if the pawn is dead but still possesses a non-destroyed,
+            non-desiccated corpse (or active resurrection capability).
+            </param>
+            <param name="IsOnColonistMap">
+            <c>true</c> if the pawn is spawned or held on an active colonist map.
+            </param>
+            <param name="IsActiveFactionLeader">
+            <c>true</c> if the pawn is alive and designated as a faction leader.
+            </param>
+        </member>
+        <member name="M:Stop_Random_Relation.PawnRoleInfo.#ctor(System.Boolean,System.Boolean,System.Boolean,System.Boolean,System.Boolean,System.Boolean)">
+            <summary>
+            Pure-value projection of a pawn's domain state used by cleanup policies.
+            </summary>
+            <param name="IsColonist">
+            <c>true</c> if the pawn is a free colonist belonging to the player faction.
+            </param>
+            <param name="IsPlayerFaction">
+            <c>true</c> if the pawn belongs to the player faction (including colony animals/mechs).
+            </param>
+            <param name="IsDead">
+            <c>true</c> if the pawn is currently dead.
+            </param>
+            <param name="IsResurrectable">
+            <c>true</c> if the pawn is dead but still possesses a non-destroyed,
+            non-desiccated corpse (or active resurrection capability).
+            </param>
+            <param name="IsOnColonistMap">
+            <c>true</c> if the pawn is spawned or held on an active colonist map.
+            </param>
+            <param name="IsActiveFactionLeader">
+            <c>true</c> if the pawn is alive and designated as a faction leader.
+            </param>
+        </member>
+        <member name="P:Stop_Random_Relation.PawnRoleInfo.IsColonist">
+            <summary>
+            <c>true</c> if the pawn is a free colonist belonging to the player faction.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.PawnRoleInfo.IsPlayerFaction">
+            <summary>
+            <c>true</c> if the pawn belongs to the player faction (including colony animals/mechs).
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.PawnRoleInfo.IsDead">
+            <summary>
+            <c>true</c> if the pawn is currently dead.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.PawnRoleInfo.IsResurrectable">
+            <summary>
+            <c>true</c> if the pawn is dead but still possesses a non-destroyed,
+            non-desiccated corpse (or active resurrection capability).
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.PawnRoleInfo.IsOnColonistMap">
+            <summary>
+            <c>true</c> if the pawn is spawned or held on an active colonist map.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.PawnRoleInfo.IsActiveFactionLeader">
+            <summary>
+            <c>true</c> if the pawn is alive and designated as a faction leader.
+            </summary>
+        </member>
+        <member name="T:Stop_Random_Relation.DirectRelationEntry`2">
+            <summary>
+            Represents a direct relation entry captured during snapshot iteration.
+            </summary>
+            <typeparam name="TPawn">The pawn representation type.</typeparam>
+            <typeparam name="TRelationDef">The relation definition type.</typeparam>
+            <param name="Def">The relation definition.</param>
+            <param name="Other">The related pawn.</param>
+        </member>
+        <member name="M:Stop_Random_Relation.DirectRelationEntry`2.#ctor(`1,`0)">
+            <summary>
+            Represents a direct relation entry captured during snapshot iteration.
+            </summary>
+            <typeparam name="TPawn">The pawn representation type.</typeparam>
+            <typeparam name="TRelationDef">The relation definition type.</typeparam>
+            <param name="Def">The relation definition.</param>
+            <param name="Other">The related pawn.</param>
+        </member>
+        <member name="P:Stop_Random_Relation.DirectRelationEntry`2.Def">
+            <summary>The relation definition.</summary>
+        </member>
+        <member name="P:Stop_Random_Relation.DirectRelationEntry`2.Other">
+            <summary>The related pawn.</summary>
+        </member>
+        <member name="T:Stop_Random_Relation.IRelationAccessor`2">
+            <summary>
+            Zero-allocation adapter contract allowing the relation cleanup engine to
+            inspect and mutate either live RimWorld pawns or test doubles without reflection.
+            </summary>
+            <typeparam name="TPawn">The pawn representation type.</typeparam>
+            <typeparam name="TRelationDef">The relation definition type.</typeparam>
+        </member>
+        <member name="M:Stop_Random_Relation.IRelationAccessor`2.GetSyncRoot(`0)">
+            <summary>
+            Returns the synchronization lock object for the specified pawn's relation tracker,
+            or <c>null</c> if the pawn has no relation tracker.
+            </summary>
+            <param name="pawn">The pawn whose relation lock object is requested.</param>
+            <returns>An object suitable for <c>lock</c>, or <c>null</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.IRelationAccessor`2.GetRoleInfo(`0)">
+            <summary>
+            Evaluates the domain role snapshot of the specified pawn.
+            </summary>
+            <param name="pawn">The pawn to evaluate.</param>
+            <returns>A <see cref="T:Stop_Random_Relation.PawnRoleInfo"/> value describing the pawn.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.IRelationAccessor`2.GetRelationCategory(`1)">
+            <summary>
+            Classifies a relation definition into a <see cref="T:Stop_Random_Relation.RelationCategory"/>.
+            </summary>
+            <param name="def">The relation definition to classify.</param>
+            <returns>The relation category.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.IRelationAccessor`2.HasAnyDirectRelations(`0)">
+            <summary>
+            Returns <c>true</c> if <paramref name="pawn"/> currently has at least one
+            direct relation, allowing <c>O(1)</c> fast-skipping before snapshotting.
+            </summary>
+            <param name="pawn">The pawn to inspect.</param>
+            <returns><c>true</c> if one or more direct relations exist; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.IRelationAccessor`2.SnapshotDirectRelations(`0,System.Collections.Generic.List{Stop_Random_Relation.DirectRelationEntry{`0,`1}})">
+            <summary>
+            Copies the pawn's direct relations into <paramref name="buffer"/> under lock
+            to allow safe iteration without collection-modification exceptions.
+            </summary>
+            <param name="pawn">The pawn whose direct relations are snapshotted.</param>
+            <param name="buffer">Caller-owned list populated with snapshots.</param>
+        </member>
+        <member name="M:Stop_Random_Relation.IRelationAccessor`2.RemoveDirectRelation(`0,`1,`0)">
+            <summary>
+            Removes the specified direct relation from <paramref name="pawn"/>.
+            </summary>
+            <param name="pawn">The pawn whose relation list is mutated.</param>
+            <param name="def">The relation definition to remove.</param>
+            <param name="other">The other pawn in the direct relation.</param>
+            <returns><c>true</c> if a matching relation existed and was removed; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.IRelationAccessor`2.DescribePawn(`0)">
+            <summary>
+            Returns a human-readable label for diagnostic logging.
+            </summary>
+            <param name="pawn">The pawn to describe.</param>
+            <returns>A short display string.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.IRelationAccessor`2.DescribeRelation(`1)">
+            <summary>
+            Returns a human-readable label for a relation definition.
+            </summary>
+            <param name="def">The relation definition to describe.</param>
+            <returns>A short display string.</returns>
+        </member>
+        <member name="T:Stop_Random_Relation.RelationshipManager">
+            <summary>
+            Core domain service coordinating relationship queries, thread-safe relation
+            severing, and <c>WorldPawnGC</c> protection checks for RimWorld pawns.
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationshipManager.SeverRelations(Verse.Pawn,System.Func{RimWorld.PawnRelationDef,System.Boolean})">
+            <summary>
+            Severs all direct relations on <paramref name="pawn"/> matching
+            <paramref name="predicate"/>, clearing reciprocal references atomically.
+            </summary>
+            <param name="pawn">The target pawn whose relations are evaluated.</param>
+            <param name="predicate">Filter specifying which relation definitions qualify for removal.</param>
+            <returns>The number of relationships severed.</returns>
+            <example>
+            <code>
+            int severed = RelationshipManager.SeverRelations(
+              leavingRaider,
+              relDef => relDef.familyByBloodRelation);
+            </code>
+            </example>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationshipManager.ShouldProtectFromGC(Verse.Pawn,System.Boolean)">
+            <summary>
+            Determines whether a world pawn should be strictly protected from
+            <c>WorldPawnGC</c>.
+            </summary>
+            <param name="pawn">The world pawn evaluated by GC.</param>
+            <param name="protectFactionLeaders">Whether living faction leaders are protected.</param>
+            <returns><c>true</c> if GC must retain this pawn; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationshipManager.ShouldProtectFromGC(Verse.Pawn,Stop_Random_Relation.RelationCleanupOptions@)">
+            <summary>
+            Determines whether a world pawn should be strictly protected from
+            <c>WorldPawnGC</c> under the provided <paramref name="options"/>.
+            </summary>
+            <param name="pawn">The world pawn evaluated by GC.</param>
+            <param name="options">Current mod configuration snapshot.</param>
+            <returns><c>true</c> if GC must retain this pawn; otherwise <c>false</c>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationshipManager.HandlePawnExitMap(Verse.Pawn,Stop_Random_Relation.RelationCleanupOptions@)">
+            <summary>
+            Handles relationship cleanup when a pawn exits a map via <c>Pawn.ExitMap</c>.
+            </summary>
+            <param name="pawn">The pawn that exited the map.</param>
+            <param name="options">Current mod configuration snapshot.</param>
+            <returns>The number of relationships severed.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationshipManager.HandlePawnKilled(Verse.Pawn,Stop_Random_Relation.RelationCleanupOptions@)">
+            <summary>
+            Handles relationship cleanup when a pawn dies via <c>Pawn.Kill</c>.
+            </summary>
+            <param name="pawn">The pawn that died.</param>
+            <param name="options">Current mod configuration snapshot.</param>
+            <returns>The number of relationships severed.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationshipManager.HandlePermanentDeath(Verse.Pawn,Stop_Random_Relation.RelationCleanupOptions@)">
+            <summary>
+            Handles relationship cleanup when a deceased pawn's corpse becomes
+            permanently unresurrectable (destroyed, cremated, butchered, or desiccated).
+            </summary>
+            <param name="pawn">The deceased pawn whose corpse is no longer resurrectable.</param>
+            <param name="options">Current mod configuration snapshot.</param>
+            <returns>The number of relationships severed.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.RelationshipManager.CleanAllOffMapWorldPawnRelations(Stop_Random_Relation.RelationCleanupOptions@)">
+            <summary>
+            Scans current world pawns and severs relations between non-colonist
+            world pawns neither of whom is present on a colonist map.
+            </summary>
+            <param name="options">Current mod configuration snapshot.</param>
+            <returns>Total number of relationships severed across the sweep.</returns>
+        </member>
+        <member name="T:Stop_Random_Relation.StopRandomRelationMod">
+            <summary>
+            Entry point and Mod Settings UI controller for Stop Random Relation.
+            </summary>
+        </member>
+        <member name="P:Stop_Random_Relation.StopRandomRelationMod.Instance">
+            <summary>
+            Gets the active mod instance initialized by RimWorld at startup.
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.StopRandomRelationMod.#ctor(Verse.ModContentPack)">
+            <summary>
+            Initializes the mod, loads persisted settings, and applies all Harmony patches.
+            </summary>
+            <param name="content">The RimWorld mod content pack descriptor.</param>
+        </member>
+        <member name="M:Stop_Random_Relation.StopRandomRelationMod.GetOptions">
+            <summary>
+            Returns an immutable, thread-safe snapshot of the active mod settings.
+            </summary>
+            <returns>The current <see cref="T:Stop_Random_Relation.RelationCleanupOptions"/>.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.StopRandomRelationMod.SettingsCategory">
+            <summary>
+            Returns the display title of the mod in RimWorld's Mod Settings menu.
+            </summary>
+            <returns>The localized settings category name.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.StopRandomRelationMod.DoSettingsWindowContents(UnityEngine.Rect)">
+            <summary>
+            Renders the vanilla-styled settings window using <see cref="T:Verse.Listing_Standard"/>.
+            All changes update the in-memory configuration snapshot immediately.
+            </summary>
+            <param name="inRect">Available drawing rectangle provided by RimWorld.</param>
+        </member>
+        <member name="T:Stop_Random_Relation.StopRandomRelationSettings">
+            <summary>
+            Persists user-configurable mod settings via RimWorld's <c>Scribe_Values</c>
+            system and provides lock-free atomic snapshot reads for runtime hooks.
+            </summary>
+        </member>
+        <member name="F:Stop_Random_Relation.StopRandomRelationSettings.modEnabled">
+            <summary>Master enable/disable switch.</summary>
+        </member>
+        <member name="F:Stop_Random_Relation.StopRandomRelationSettings.cleanColonistRelationsOnPermanentDeath">
+            <summary>Clean colonist relations when corpse cannot be resurrected.</summary>
+        </member>
+        <member name="F:Stop_Random_Relation.StopRandomRelationSettings.cleanColonistToWorldRelationsOnExitOrDeath">
+            <summary>Clean colonist-to-world-pawn relations on exit or death.</summary>
+        </member>
+        <member name="F:Stop_Random_Relation.StopRandomRelationSettings.cleanWorldToWorldRelationsOnExitOrDeath">
+            <summary>Clean world-pawn-to-world-pawn relations on exit or death.</summary>
+        </member>
+        <member name="F:Stop_Random_Relation.StopRandomRelationSettings.cleanOffMapWorldPawnRelations">
+            <summary>Clean relations between off-map world pawns.</summary>
+        </member>
+        <member name="F:Stop_Random_Relation.StopRandomRelationSettings.protectLivingFactionLeaders">
+            <summary>Protect living faction leaders from WorldPawnGC.</summary>
+        </member>
+        <member name="F:Stop_Random_Relation.StopRandomRelationSettings.includeNonBloodRelations">
+            <summary>Include non-blood marriage/romance relations in cleanup.</summary>
+        </member>
+        <member name="F:Stop_Random_Relation.StopRandomRelationSettings.verboseLogging">
+            <summary>Emit verbose diagnostic messages to the RimWorld log.</summary>
+        </member>
+        <member name="M:Stop_Random_Relation.StopRandomRelationSettings.GetOptionsSnapshot">
+            <summary>
+            Returns an immutable, thread-safe snapshot of the current settings.
+            </summary>
+            <returns>The current <see cref="T:Stop_Random_Relation.RelationCleanupOptions"/> snapshot.</returns>
+        </member>
+        <member name="M:Stop_Random_Relation.StopRandomRelationSettings.RefreshSnapshot">
+            <summary>
+            Atomically publishes the current field values to the lock-free snapshot.
+            Must be called after modifying settings fields in UI or loading data.
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.StopRandomRelationSettings.ResetToDefaults">
+            <summary>
+            Restores all configurable options to their specification defaults and
+            immediately updates the live snapshot.
+            </summary>
+        </member>
+        <member name="M:Stop_Random_Relation.StopRandomRelationSettings.ExposeData">
+            <summary>
+            Serializes and deserializes mod settings using RimWorld's Scribe system.
+            </summary>
+        </member>
+    </members>
+</doc>

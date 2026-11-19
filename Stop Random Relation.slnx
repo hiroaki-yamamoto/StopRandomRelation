@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Stop Random Relation/Stop Random Relation.csproj" />
+  <Project Path="Stop Random Relation.Tests/Stop Random Relation.Tests.csproj" />
+</Solution>
